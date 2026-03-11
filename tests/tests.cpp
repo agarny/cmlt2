@@ -298,11 +298,11 @@ static void testParserMinimal() {
     SUITE("Parser/Minimal");
 
     std::string input = R"(
-model TestModel
-
-component membrane {
-    V: mV = -75.0
-    t: ms
+TestModel {
+    component membrane {
+        V: mV = -75.0
+        t: ms
+    }
 }
 )";
 
@@ -323,17 +323,36 @@ component membrane {
     }
 }
 
+static void testParserLegacy() {
+    SUITE("Parser/Legacy");
+
+    std::string input = R"(
+model TestModel
+
+component membrane {
+    V: mV = -75.0
+    t: ms
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(model != nullptr);
+    CHECK_EQ(model->name(), std::string("TestModel"));
+    CHECK_EQ(model->componentCount(), size_t(1));
+}
+
 static void testParserEquation() {
     SUITE("Parser/Equation");
 
     std::string input = R"(
-model Test
+Test {
+    component C {
+        x: dimensionless
+        y: dimensionless
 
-component C {
-    x: dimensionless
-    y: dimensionless
-
-    x = 2 * y + 3
+        x = 2 * y + 3
+    }
 }
 )";
 
@@ -352,13 +371,13 @@ static void testParserDerivative() {
     SUITE("Parser/Derivative");
 
     std::string input = R"(
-model Test
+Test {
+    component C {
+        V: mV
+        t: ms
 
-component C {
-    V: mV
-    t: ms
-
-    d(V)/d(t) = -10.0
+        d(V)/d(t) = -10.0
+    }
 }
 )";
 
@@ -374,15 +393,15 @@ static void testParserPiecewise() {
     SUITE("Parser/Piecewise");
 
     std::string input = R"(
-model Test
+Test {
+    component C {
+        x: dimensionless
+        V: mV
 
-component C {
-    x: dimensionless
-    V: mV
-
-    x = {
-        1.0  when V > 0
-        0.0  otherwise
+        x = {
+            1.0  when V > 0
+            0.0  otherwise
+        }
     }
 }
 )";
@@ -399,6 +418,7 @@ component C {
 static void testParserMap() {
     SUITE("Parser/Map");
 
+    // Legacy map syntax (still supported).
     std::string input = R"(
 model Test
 
@@ -431,6 +451,7 @@ map A.V <-> B.V
 static void testParserGroup() {
     SUITE("Parser/Group");
 
+    // Legacy group syntax (still supported).
     std::string input = R"(
 model Test
 
@@ -450,7 +471,6 @@ group parent contains {
     Parser parser;
     auto model = parser.parse(input);
 
-    // After grouping, 'child' should be under 'parent'.
     auto parentComp = model->component("parent");
     CHECK(parentComp != nullptr);
     if (parentComp) {
@@ -458,6 +478,76 @@ group parent contains {
         if (parentComp->componentCount() > 0)
             CHECK_EQ(parentComp->component(0)->name(), std::string("child"));
     }
+}
+
+static void testParserNested() {
+    SUITE("Parser/Nested");
+
+    std::string input = R"(
+Test {
+    component parent {
+        V: mV = -75.0
+
+        component child {
+            V: parent.V
+        }
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(model != nullptr);
+    CHECK_EQ(model->name(), std::string("Test"));
+    CHECK_EQ(model->componentCount(), size_t(1));
+
+    auto parent = model->component(0);
+    CHECK_EQ(parent->name(), std::string("parent"));
+    CHECK_EQ(parent->componentCount(), size_t(1));
+
+    auto child = parent->component(0);
+    CHECK_EQ(child->name(), std::string("child"));
+
+    auto childV = child->variable("V");
+    CHECK(childV != nullptr);
+    if (childV) {
+        CHECK(childV->equivalentVariableCount() > 0);
+    }
+}
+
+static void testParserConnection() {
+    SUITE("Parser/Connection");
+
+    std::string input = R"(
+Test {
+    component membrane {
+        V: mV = -75.0
+        I: channel.I
+
+        component channel {
+            V: membrane.V
+            I: uA/cm^2
+
+            I = V * 0.5
+        }
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    auto membrane = model->component(0);
+    auto channel = membrane->component(0);
+
+    // Check that membrane.I is connected to channel.I
+    auto memI = membrane->variable("I");
+    CHECK(memI != nullptr);
+    if (memI) CHECK(memI->equivalentVariableCount() > 0);
+
+    // Check that channel.V is connected to membrane.V
+    auto chanV = channel->variable("V");
+    CHECK(chanV != nullptr);
+    if (chanV) CHECK(chanV->equivalentVariableCount() > 0);
 }
 
 // =====================================================================
@@ -478,9 +568,44 @@ static void testSerializerBasic() {
     Serializer ser;
     std::string text = ser.serialize(model);
 
-    CHECK(text.find("model TestModel") != std::string::npos);
+    CHECK(text.find("TestModel {") != std::string::npos);
     CHECK(text.find("component membrane") != std::string::npos);
     CHECK(text.find("V:") != std::string::npos);
+}
+
+static void testSerializerConnection() {
+    SUITE("Serializer/Connection");
+
+    // Build a model with a parent-child connection.
+    auto model = libcellml::Model::create("ConnTest");
+    auto parent = libcellml::Component::create("membrane");
+    auto child = libcellml::Component::create("channel");
+
+    auto parentV = libcellml::Variable::create("V");
+    parentV->setUnits("volt");
+    parentV->setInitialValue(-75.0);
+    parent->addVariable(parentV);
+
+    auto childV = libcellml::Variable::create("V");
+    childV->setUnits("volt");
+    child->addVariable(childV);
+
+    auto childI = libcellml::Variable::create("I");
+    childI->setUnits("ampere");
+    child->addVariable(childI);
+
+    parent->addComponent(child);
+    model->addComponent(parent);
+
+    libcellml::Variable::addEquivalence(parentV, childV);
+
+    Serializer ser;
+    std::string text = ser.serialize(model);
+
+    // Child's V should appear as a connection.
+    CHECK(text.find("V: membrane.V") != std::string::npos);
+    // Child's I (no equivalence) should appear with units.
+    CHECK(text.find("I: A") != std::string::npos);
 }
 
 // =====================================================================
@@ -491,13 +616,13 @@ static void testRoundTripSimple() {
     SUITE("RoundTrip/Simple");
 
     std::string input = R"(
-model RoundTripTest
+RoundTripTest {
+    component main {
+        x: dimensionless = 1.0
+        y: dimensionless
 
-component main {
-    x: dimensionless = 1.0
-    y: dimensionless
-
-    y = 2.0 * x + 3.0
+        y = 2.0 * x + 3.0
+    }
 }
 )";
 
@@ -513,7 +638,7 @@ component main {
     CHECK(!output.empty());
 
     // Verify key elements are preserved.
-    CHECK(output.find("model RoundTripTest") != std::string::npos);
+    CHECK(output.find("RoundTripTest") != std::string::npos);
     CHECK(output.find("component main") != std::string::npos);
 }
 
@@ -521,16 +646,16 @@ static void testRoundTripCellMLXML() {
     SUITE("RoundTrip/CellML-XML");
 
     std::string input = R"(
-model Noble62
+Noble62 {
+    component membrane {
+        V: mV = -87.0
+        t: ms
+        Cm: uF/cm^2 = 12.0
+        I_Na: uA/cm^2
+        I_K: uA/cm^2
 
-component membrane {
-    V: mV = -87.0
-    t: ms
-    Cm: uF/cm^2 = 12.0
-    I_Na: uA/cm^2
-    I_K: uA/cm^2
-
-    Cm * d(V)/d(t) = -(I_Na + I_K)
+        Cm * d(V)/d(t) = -(I_Na + I_K)
+    }
 }
 )";
 
@@ -576,14 +701,18 @@ int main() {
 
     // Parser.
     testParserMinimal();
+    testParserLegacy();
     testParserEquation();
     testParserDerivative();
     testParserPiecewise();
     testParserMap();
     testParserGroup();
+    testParserNested();
+    testParserConnection();
 
     // Serializer.
     testSerializerBasic();
+    testSerializerConnection();
 
     // Round-trip.
     testRoundTripSimple();

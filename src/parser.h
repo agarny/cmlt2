@@ -42,8 +42,9 @@ private:
 
     // Top-level.
     void parseModel();
+    void parseModelBody();
     void parseTopLevel();
-    void parseComponent();
+    void parseComponent(const libcellml::ComponentPtr &parent);
     void parseMapStatement();
     void parseGroupStatement();
     void parseImportStatement();
@@ -57,6 +58,9 @@ private:
 
     // Unit expression (after ':').
     std::string parseUnitExpr();
+
+    // Post-processing: resolve dot-notation connections.
+    void resolveConnections();
 
     // Expression parser (recursive descent, Pratt-style precedence).
     ExprPtr parseExpression();
@@ -74,10 +78,18 @@ private:
     // Post-process AST to recognise derivative patterns.
     ExprPtr transformDerivatives(ExprPtr expr);
 
+    struct ConnectionRef {
+        libcellml::ComponentPtr component;
+        std::string variableName;
+        std::string sourceComponentName;
+        std::string sourceVariableName;
+    };
+
     std::vector<Token> tokens_;
     size_t pos_ = 0;
     std::vector<ParseError> errors_;
     libcellml::ModelPtr model_;
+    std::vector<ConnectionRef> pendingConnections_;
 };
 
 } // namespace cellmltext

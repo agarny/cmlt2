@@ -7,35 +7,25 @@ mathematical background, requiring **no knowledge of CellML or XML**.
 ## Quick Example
 
 ```
-model HodgkinHuxley1952
-
-component membrane {
+HodgkinHuxley1952 {
+  component membrane {
     V: mV = -75.0
     t: ms
     Cm: uF/cm^2 = 1.0
-    I_Na: uA/cm^2
+    I_Na: sodium_channel.I_Na
     I_K: uA/cm^2
-    I_L: uA/cm^2
 
-    Cm * d(V)/d(t) = -(I_Na + I_K + I_L)
-}
+    Cm * d(V)/d(t) = -(I_Na + I_K)
 
-component sodium_channel {
-    V: mV
-    g_Na: mS/cm^2 = 120.0
-    E_Na: mV = 50.0
-    m: 1
-    h: 1
-    I_Na: uA/cm^2
+    component sodium_channel {
+      V: membrane.V
+      g_Na: mS/cm^2 = 120.0
+      E_Na: mV = 50.0
+      I_Na: uA/cm^2
 
-    I_Na = g_Na * m^3 * h * (V - E_Na)
-}
-
-map membrane.V <-> sodium_channel.V
-map membrane.I_Na <-> sodium_channel.I_Na
-
-group membrane contains {
-    sodium_channel
+      I_Na = g_Na * (V - E_Na)
+    }
+  }
 }
 ```
 
@@ -43,31 +33,47 @@ group membrane contains {
 
 ## 1. Model Declaration
 
-Every file begins with a model declaration:
+Every file wraps the entire model in a named block:
 
 ```
-model <name>
+<name> {
+    ...
+}
 ```
 
 The name is a plain identifier (letters, digits, underscores).
+For backward compatibility, `model <name>` (without braces) is also accepted.
 
 ---
 
 ## 2. Components
 
-Components group variables and equations:
+Components group variables, equations, and nested child components:
 
 ```
 component <name> {
     <variable declarations>
     <equations>
-    <resets>
+    <nested components>
+}
+```
+
+Components can be nested to define a hierarchy (encapsulation), removing the
+need for separate `group` statements:
+
+```
+component parent {
+    component child {
+        ...
+    }
 }
 ```
 
 ---
 
 ## 3. Variable Declarations
+
+### Definition (with units)
 
 ```
 <name>: <unit> [= <initial_value>]
@@ -79,6 +85,22 @@ V: mV = -75.0          // millivolts, starts at -75
 t: ms                   // milliseconds
 Cm: uF/cm^2 = 1.0      // microfarads per square centimetre
 ratio: 1                // dimensionless
+```
+
+### Connection (referencing another component's variable)
+
+```
+<name>: <component_name>.<variable_name>
+```
+
+This declares a variable that is connected to (equivalent to) the named
+variable in another component. Units are inherited automatically from the
+source variable. This replaces explicit `map` statements.
+
+Examples:
+```
+V: membrane.V           // connected to membrane's V variable
+I_Na: sodium_channel.I_Na  // connected to sodium_channel's I_Na
 ```
 
 ---
@@ -228,35 +250,41 @@ x = {
 
 ---
 
-## 7. Variable Mappings
+## 7. Component Hierarchy (Encapsulation)
 
-Connect variables between components:
-
-```
-map membrane.V <-> sodium_channel.V
-map membrane.I_Na <-> sodium_channel.I_Na
-```
-
-The `<->` means the variables are equivalent (connected). Variable interface
-types are inferred automatically.
-
----
-
-## 8. Component Hierarchy (Encapsulation)
-
-Define parent-child relationships:
+Nest components to define parent-child relationships:
 
 ```
-group membrane contains {
-    sodium_channel
-    potassium_channel
-    leak_channel
+component membrane {
+    V: mV = -75.0
+
+    component sodium_channel {
+        V: membrane.V
+        ...
+    }
+
+    component potassium_channel {
+        V: membrane.V
+        ...
+    }
 }
 ```
 
+Nesting eliminates the need for separate `group` statements. The hierarchy
+is encoded directly in the structure.
+
+### Legacy Syntax (still accepted)
+
+For backward compatibility, `map` and `group` statements are still parsed:
+
+```
+map membrane.V <-> sodium_channel.V
+group membrane contains { sodium_channel }
+```
+
 ---
 
-## 9. Imports
+## 8. Imports
 
 Reuse components and units from other files:
 
@@ -270,7 +298,7 @@ import "path/to/model.cellml" {
 
 ---
 
-## 10. Resets
+## 9. Resets
 
 Define reset behaviour inside components:
 
@@ -288,7 +316,7 @@ component stimulus {
 
 ---
 
-## 11. Comments
+## 10. Comments
 
 Single-line comments with `//`:
 
@@ -299,15 +327,17 @@ V: mV = -75.0  // membrane potential
 
 ---
 
-## 12. Grammar Summary (Informal)
+## 11. Grammar Summary (Informal)
 
 ```
-file          = model_decl { top_level_item }
-model_decl    = "model" IDENTIFIER
+file          = model_block
+model_block   = IDENTIFIER "{" { top_level_item } "}"
+              | "model" IDENTIFIER [ "{" { top_level_item } "}" ]
 top_level_item= component | map_stmt | group_stmt | import_stmt | unit_def
 component     = "component" IDENTIFIER "{" { comp_item } "}"
-comp_item     = var_decl | equation | reset_stmt
-var_decl      = IDENTIFIER ":" unit_expr [ "=" expression ]
+comp_item     = var_decl | equation | reset_stmt | component
+var_decl      = IDENTIFIER ":" ( unit_expr [ "=" expression ] | connection )
+connection    = IDENTIFIER "." IDENTIFIER
 equation      = expression "=" expression
 unit_expr     = unit_term { ("*" | "/") unit_term }
 unit_term     = unit_atom [ "^" ["-"] NUMBER ]

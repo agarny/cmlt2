@@ -82,6 +82,7 @@ libcellml::ModelPtr Parser::parse(const std::string &source) {
     pos_ = 0;
     errors_.clear();
     model_ = libcellml::Model::create();
+    pendingConnections_.clear();
 
     // Copy lexer errors.
     for (auto &le : lexer.errors())
@@ -89,12 +90,9 @@ libcellml::ModelPtr Parser::parse(const std::string &source) {
 
     skipNewlines();
     parseModel();
-    skipNewlines();
 
-    while (!check(TokenType::Eof)) {
-        parseTopLevel();
-        skipNewlines();
-    }
+    // Resolve dot-notation connections.
+    resolveConnections();
 
     // Fix variable interfaces based on equivalences and hierarchy.
     model_->fixVariableInterfaces();
@@ -103,9 +101,44 @@ libcellml::ModelPtr Parser::parse(const std::string &source) {
 }
 
 void Parser::parseModel() {
-    expect(TokenType::Model, "model declaration");
-    Token name = expect(TokenType::Identifier, "model name");
-    model_->setName(name.value);
+    // Support two forms:
+    //   New:    Name { ... }
+    //   Legacy: model Name [{ ... }]
+    if (match(TokenType::Model)) {
+        // Legacy: model Name
+        Token name = expect(TokenType::Identifier, "model name");
+        model_->setName(name.value);
+        skipNewlines();
+        if (match(TokenType::LBrace)) {
+            parseModelBody();
+            expect(TokenType::RBrace, "model body");
+        } else {
+            // Flat legacy format — top-level items until EOF.
+            while (!check(TokenType::Eof)) {
+                parseTopLevel();
+                skipNewlines();
+            }
+        }
+    } else if (check(TokenType::Identifier)) {
+        // New: Name { ... }
+        Token name = advance();
+        model_->setName(name.value);
+        skipNewlines();
+        expect(TokenType::LBrace, "model body");
+        parseModelBody();
+        expect(TokenType::RBrace, "model body");
+        skipNewlines();
+    } else {
+        error("Expected model name");
+    }
+}
+
+void Parser::parseModelBody() {
+    while (!check(TokenType::RBrace) && !check(TokenType::Eof)) {
+        skipNewlines();
+        if (check(TokenType::RBrace)) break;
+        parseTopLevel();
+    }
 }
 
 void Parser::parseTopLevel() {
@@ -113,7 +146,7 @@ void Parser::parseTopLevel() {
     if (check(TokenType::Eof)) return;
 
     switch (current().type) {
-    case TokenType::Component:  parseComponent();       break;
+    case TokenType::Component:  parseComponent(nullptr);  break;
     case TokenType::Map:        parseMapStatement();    break;
     case TokenType::Group:      parseGroupStatement();  break;
     case TokenType::Import:     parseImportStatement(); break;
@@ -129,7 +162,7 @@ void Parser::parseTopLevel() {
 //  component <name> { ... }
 // ===================================================================
 
-void Parser::parseComponent() {
+void Parser::parseComponent(const libcellml::ComponentPtr &parent) {
     expect(TokenType::Component, "component");
     Token name = expect(TokenType::Identifier, "component name");
     auto comp = libcellml::Component::create(name.value);
@@ -141,7 +174,11 @@ void Parser::parseComponent() {
 
     expect(TokenType::RBrace, "component body");
 
-    model_->addComponent(comp);
+    if (parent) {
+        parent->addComponent(comp);
+    } else {
+        model_->addComponent(comp);
+    }
 }
 
 void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
@@ -151,6 +188,13 @@ void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
     while (!check(TokenType::RBrace) && !check(TokenType::Eof)) {
         skipNewlines();
         if (check(TokenType::RBrace)) break;
+
+        // Nested component declaration.
+        if (check(TokenType::Component)) {
+            parseComponent(comp);
+            skipNewlines();
+            continue;
+        }
 
         // Determine if this is a variable declaration, equation, or reset.
         if (check(TokenType::Reset)) {
@@ -216,6 +260,31 @@ void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
 void Parser::parseVarDecl(const libcellml::ComponentPtr &comp) {
     Token name = expect(TokenType::Identifier, "variable name");
     expect(TokenType::Colon, "variable declaration");
+
+    // Check for connection reference: IDENTIFIER DOT IDENTIFIER
+    // (dot never appears in unit expressions, so this is unambiguous)
+    if (check(TokenType::Identifier)) {
+        size_t savedPos = pos_;
+        Token firstTok = advance();
+        if (check(TokenType::Dot)) {
+            advance(); // consume dot
+            if (check(TokenType::Identifier)) {
+                Token secondTok = advance();
+
+                // This is a connection: name connects to firstTok.secondTok
+                auto var = libcellml::Variable::create(name.value);
+                var->setUnits("dimensionless"); // placeholder, resolved later
+                comp->addVariable(var);
+
+                pendingConnections_.push_back(
+                    {comp, name.value, firstTok.value, secondTok.value});
+                skipNewlines();
+                return;
+            }
+        }
+        // Not a connection — backtrack and parse as unit expression.
+        pos_ = savedPos;
+    }
 
     // Parse unit expression (consumes tokens until '=' or newline).
     std::string unitText = parseUnitExpr();
@@ -285,6 +354,164 @@ std::string Parser::parseUnitExpr() {
         else break;
     }
     return result;
+}
+
+// ===================================================================
+//  Resolve dot-notation connections (post-processing).
+//  For each pending connection like  V: membrane.V
+//  we find the source variable, copy its units, and create CellML
+//  variable equivalences along the encapsulation chain.
+// ===================================================================
+
+void Parser::resolveConnections() {
+    // Build parent map: child component name → parent component.
+    std::unordered_map<std::string, libcellml::ComponentPtr> parentMap;
+    std::function<void(const libcellml::ComponentPtr &)> buildParentMap;
+    buildParentMap = [&](const libcellml::ComponentPtr &comp) {
+        for (size_t i = 0; i < comp->componentCount(); ++i) {
+            auto child = comp->component(i);
+            parentMap[child->name()] = comp;
+            buildParentMap(child);
+        }
+    };
+    for (size_t i = 0; i < model_->componentCount(); ++i)
+        buildParentMap(model_->component(i));
+
+    // Find component by name (recursive).
+    std::function<libcellml::ComponentPtr(const libcellml::ComponentPtr &,
+                                          const std::string &)> findCompIn;
+    findCompIn = [&](const libcellml::ComponentPtr &root,
+                     const std::string &name) -> libcellml::ComponentPtr {
+        if (root->name() == name) return root;
+        for (size_t i = 0; i < root->componentCount(); ++i) {
+            auto f = findCompIn(root->component(i), name);
+            if (f) return f;
+        }
+        return nullptr;
+    };
+    auto findComp = [&](const std::string &name) -> libcellml::ComponentPtr {
+        for (size_t i = 0; i < model_->componentCount(); ++i) {
+            auto f = findCompIn(model_->component(i), name);
+            if (f) return f;
+        }
+        return nullptr;
+    };
+
+    // Test if `ancestor` is an ancestor of `descendant`.
+    auto isAncestorOf = [&](const libcellml::ComponentPtr &ancestor,
+                            const libcellml::ComponentPtr &descendant) -> bool {
+        auto cur = descendant;
+        while (true) {
+            auto pIt = parentMap.find(cur->name());
+            if (pIt == parentMap.end()) return false;
+            if (pIt->second == ancestor) return true;
+            cur = pIt->second;
+        }
+    };
+
+    auto areEquivalent = [](const libcellml::VariablePtr &v1,
+                            const libcellml::VariablePtr &v2) -> bool {
+        for (size_t i = 0; i < v1->equivalentVariableCount(); ++i)
+            if (v1->equivalentVariable(i) == v2) return true;
+        return false;
+    };
+
+    for (auto &ref : pendingConnections_) {
+        auto sourceComp = findComp(ref.sourceComponentName);
+        if (!sourceComp) {
+            error("Component '" + ref.sourceComponentName + "' not found");
+            continue;
+        }
+        auto sourceVar = sourceComp->variable(ref.sourceVariableName);
+        if (!sourceVar) {
+            error("Variable '" + ref.sourceVariableName
+                  + "' not found in '" + ref.sourceComponentName + "'");
+            continue;
+        }
+
+        auto localVar = ref.component->variable(ref.variableName);
+        if (!localVar) continue;
+
+        // Copy units from source variable.
+        if (auto su = sourceVar->units())
+            localVar->setUnits(su->name());
+
+        // --- Create equivalence chain along the encapsulation hierarchy ---
+
+        // Case 1: source is a direct parent.
+        auto pIt = parentMap.find(ref.component->name());
+        if (pIt != parentMap.end() && pIt->second == sourceComp) {
+            if (!areEquivalent(localVar, sourceVar))
+                libcellml::Variable::addEquivalence(localVar, sourceVar);
+            continue;
+        }
+
+        // Case 2: source is a direct child.
+        bool isDirectChild = false;
+        for (size_t i = 0; i < ref.component->componentCount(); ++i) {
+            if (ref.component->component(i) == sourceComp) {
+                isDirectChild = true; break;
+            }
+        }
+        if (isDirectChild) {
+            if (!areEquivalent(localVar, sourceVar))
+                libcellml::Variable::addEquivalence(localVar, sourceVar);
+            continue;
+        }
+
+        // Case 3: source is an ancestor — walk up creating a chain.
+        if (isAncestorOf(sourceComp, ref.component)) {
+            auto cur = ref.component;
+            auto curVar = localVar;
+            while (cur != sourceComp) {
+                auto curParent = parentMap[cur->name()];
+                auto pVar = curParent->variable(ref.sourceVariableName);
+                if (!pVar) {
+                    // Create intermediary variable.
+                    pVar = libcellml::Variable::create(ref.sourceVariableName);
+                    if (auto su = sourceVar->units())
+                        pVar->setUnits(su->name());
+                    curParent->addVariable(pVar);
+                }
+                if (!areEquivalent(curVar, pVar))
+                    libcellml::Variable::addEquivalence(curVar, pVar);
+                curVar = pVar;
+                cur = curParent;
+            }
+            continue;
+        }
+
+        // Case 4: source is a descendant — walk up from source.
+        if (isAncestorOf(ref.component, sourceComp)) {
+            std::vector<libcellml::ComponentPtr> path;
+            auto cur = sourceComp;
+            while (cur != ref.component) {
+                path.push_back(cur);
+                auto bp = parentMap.find(cur->name());
+                if (bp == parentMap.end()) break;
+                cur = bp->second;
+            }
+            auto curVar = localVar;
+            for (int i = static_cast<int>(path.size()) - 1; i >= 0; --i) {
+                auto comp = path[static_cast<size_t>(i)];
+                auto cVar = comp->variable(ref.sourceVariableName);
+                if (!cVar) {
+                    cVar = libcellml::Variable::create(ref.sourceVariableName);
+                    if (auto su = sourceVar->units())
+                        cVar->setUnits(su->name());
+                    comp->addVariable(cVar);
+                }
+                if (!areEquivalent(curVar, cVar))
+                    libcellml::Variable::addEquivalence(curVar, cVar);
+                curVar = cVar;
+            }
+            continue;
+        }
+
+        // Case 5: sibling or other — direct equivalence.
+        if (!areEquivalent(localVar, sourceVar))
+            libcellml::Variable::addEquivalence(localVar, sourceVar);
+    }
 }
 
 // ===================================================================

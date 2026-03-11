@@ -5,133 +5,94 @@
 //  Ref: Hodgkin & Huxley (1952) J Physiol 117, 500–544
 // =====================================================================
 
-model HodgkinHuxley1952
-
-// ----- Membrane component -----
-component membrane {
-    V: mV = -75.0           // membrane potential
-    t: ms                   // time
-    Cm: uF/cm^2 = 1.0      // membrane capacitance
-    I_Na: uA/cm^2           // sodium current
-    I_K: uA/cm^2            // potassium current
-    I_L: uA/cm^2            // leak current
-    I_stim: uA/cm^2 = 0.0  // stimulus current
+HodgkinHuxley1952 {
+  component membrane {
+    V: mV = -75.0               // membrane potential
+    t: ms                       // time
+    Cm: uF/cm^2 = 1.0           // membrane capacitance
+    I_Na: sodium_channel.I_Na   // sodium current
+    I_K: potassium_channel.I_K  // potassium current
+    I_L: leak_channel.I_L       // leak current
+    I_stim: uA/cm^2 = 0.0       // stimulus current
 
     Cm * d(V)/d(t) = -(I_Na + I_K + I_L) + I_stim
-}
 
-// ----- Sodium channel -----
-component sodium_channel {
-    V: mV
-    I_Na: uA/cm^2
-    g_Na: mS/cm^2 = 120.0  // maximum conductance
-    E_Na: mV = 50.0         // reversal potential
-    m: dimensionless
-    h: dimensionless
+    // ----- Sodium channel -----
 
-    I_Na = g_Na * m^3 * h * (V - E_Na)
-}
+    component sodium_channel {
+      V: membrane.V               // membrane potential
+      I_Na: uA/cm^2               // sodium current
+      g_Na: mS/cm^2 = 120.0       // maximum conductance
+      E_Na: mV = 50.0             // reversal potential
+      m: sodium_channel_m_gate.m  // activation gating variable
+      h: sodium_channel_h_gate.h  // inactivation gating variable
 
-component sodium_channel_m_gate {
-    V: mV
-    t: ms
-    m: dimensionless = 0.05
-    alpha_m: 1/ms
-    beta_m: 1/ms
+      I_Na = g_Na * m^3 * h * (V - E_Na)
 
-    d(m)/d(t) = alpha_m * (1 - m) - beta_m * m
+      component sodium_channel_m_gate {
+        V: membrane.V            // membrane potential
+        t: membrane.t            // time
+        m: dimensionless = 0.05  // activation gating variable
+        alpha_m: 1/ms            // voltage-dependent rate constant for m activation
+        beta_m: 1/ms             // voltage-dependent rate constant for m inactivation
 
-    alpha_m = {
-        0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
-        1.0  otherwise
+        d(m)/d(t) = alpha_m * (1 - m) - beta_m * m
+        alpha_m = {
+          0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
+          1.0  otherwise
+        }
+        beta_m = 4.0 * exp(V / 18)
+      }
+
+      component sodium_channel_h_gate {
+        V: membrane.V           // membrane potential
+        t: membrane.t           // time
+        h: dimensionless = 0.6  // inactivation gating variable
+        alpha_h: 1/ms           // voltage-dependent rate constant for h activation
+        beta_h: 1/ms            // voltage-dependent rate constant for h inactivation
+
+        d(h)/d(t) = alpha_h * (1 - h) - beta_h * h
+        alpha_h = 0.07 * exp(V / 20)
+        beta_h = 1 / (exp((V + 30) / 10) + 1)
+      }
     }
 
-    beta_m = 4.0 * exp(V / 18)
-}
+    // ----- Potassium channel -----
 
-component sodium_channel_h_gate {
-    V: mV
-    t: ms
-    h: dimensionless = 0.6
-    alpha_h: 1/ms
-    beta_h: 1/ms
+    component potassium_channel {
+      V: membrane.V                  // membrane potential
+      I_K: uA/cm^2                   // potassium current
+      g_K: mS/cm^2 = 36.0            // maximum conductance
+      E_K: mV = -77.0                // reversal potential
+      n: potassium_channel_n_gate.n  // activation gating variable
 
-    d(h)/d(t) = alpha_h * (1 - h) - beta_h * h
+      I_K = g_K * n^4 * (V - E_K)
 
-    alpha_h = 0.07 * exp(V / 20)
+      component potassium_channel_n_gate {
+        V: membrane.V             // membrane potential
+        t: membrane.t             // time
+        n: dimensionless = 0.325  // activation gating variable
+        alpha_n: 1/ms             // voltage-dependent rate constant for n activation
+        beta_n: 1/ms              // voltage-dependent rate constant for n inactivation
 
-    beta_h = 1 / (exp((V + 30) / 10) + 1)
-}
-
-// ----- Potassium channel -----
-component potassium_channel {
-    V: mV
-    I_K: uA/cm^2
-    g_K: mS/cm^2 = 36.0    // maximum conductance
-    E_K: mV = -77.0         // reversal potential
-    n: dimensionless
-
-    I_K = g_K * n^4 * (V - E_K)
-}
-
-component potassium_channel_n_gate {
-    V: mV
-    t: ms
-    n: dimensionless = 0.325
-    alpha_n: 1/ms
-    beta_n: 1/ms
-
-    d(n)/d(t) = alpha_n * (1 - n) - beta_n * n
-
-    alpha_n = {
-        0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
-        0.1  otherwise
+        d(n)/d(t) = alpha_n * (1 - n) - beta_n * n
+        alpha_n = {
+            0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
+            0.1  otherwise
+        }
+        beta_n = 0.125 * exp(V / 80)
+      }
     }
 
-    beta_n = 0.125 * exp(V / 80)
-}
+    // ----- Leak channel -----
 
-// ----- Leak channel -----
-component leak_channel {
-    V: mV
-    I_L: uA/cm^2
-    g_L: mS/cm^2 = 0.3     // leak conductance
-    E_L: mV = -54.4         // leak reversal potential
+    component leak_channel {
+      V: membrane.V       // membrane potential
+      I_L: uA/cm^2        // leak current
+      g_L: mS/cm^2 = 0.3  // leak conductance
+      E_L: mV = -54.4     // leak reversal potential
 
-    I_L = g_L * (V - E_L)
-}
-
-// ----- Variable connections -----
-map membrane.V <-> sodium_channel.V
-map membrane.I_Na <-> sodium_channel.I_Na
-map sodium_channel.V <-> sodium_channel_m_gate.V
-map sodium_channel.m <-> sodium_channel_m_gate.m
-map sodium_channel.V <-> sodium_channel_h_gate.V
-map sodium_channel.h <-> sodium_channel_h_gate.h
-map membrane.t <-> sodium_channel_m_gate.t
-map membrane.t <-> sodium_channel_h_gate.t
-
-map membrane.V <-> potassium_channel.V
-map membrane.I_K <-> potassium_channel.I_K
-map potassium_channel.V <-> potassium_channel_n_gate.V
-map potassium_channel.n <-> potassium_channel_n_gate.n
-map membrane.t <-> potassium_channel_n_gate.t
-
-map membrane.V <-> leak_channel.V
-map membrane.I_L <-> leak_channel.I_L
-
-// ----- Component hierarchy -----
-group membrane contains {
-    sodium_channel
-    potassium_channel
-    leak_channel
-}
-
-group sodium_channel contains {
-    sodium_channel_m_gate
-    sodium_channel_h_gate
-}
-
-group potassium_channel contains {
-    potassium_channel_n_gate
+      I_L = g_L * (V - E_L)
+    }
+  }
 }

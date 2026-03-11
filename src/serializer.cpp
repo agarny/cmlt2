@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -139,6 +141,7 @@ static std::string exprToText(const Expr *expr, int parentPrec) {
 std::string Serializer::serialize(const libcellml::ModelPtr &model) {
     output_.clear();
     errors_.clear();
+    definedVarsCache_.clear();
 
     writeModel(model);
     return output_;
@@ -155,7 +158,7 @@ void Serializer::writeLine(const std::string &text, int indent) {
 
 void Serializer::writeIndent(int indent) {
     for (int i = 0; i < indent; ++i)
-        output_ += "    ";
+        output_ += "  ";
 }
 
 void Serializer::newline() {
@@ -163,36 +166,30 @@ void Serializer::newline() {
 }
 
 // ===================================================================
-//  Model
+//  Model  —  Name { ... }
 // ===================================================================
 
 void Serializer::writeModel(const libcellml::ModelPtr &model) {
-    writeLine("model " + model->name());
-    newline();
+    writeLine(model->name() + " {");
 
     // Write unit definitions (non-standard, non-imported).
-    writeUnitDefinitions(model);
+    writeUnitDefinitions(model, 1);
 
     // Write imports.
-    writeImports(model);
+    writeImports(model, 1);
 
-    // Write components (top-level only; children are written recursively).
+    // Write components (top-level only; children are nested inside).
     for (size_t i = 0; i < model->componentCount(); ++i) {
         auto comp = model->component(i);
-        if (comp->isImport()) continue;   // imported components handled above
-        writeComponent(comp, 0);
-        newline();
+        if (comp->isImport()) continue;
+        writeComponent(comp, 1);
     }
 
-    // Write connections.
-    writeConnections(model);
-
-    // Write encapsulation.
-    writeEncapsulation(model);
+    writeLine("}");
 }
 
 // ===================================================================
-//  Component
+//  Component  —  nested with children inside
 // ===================================================================
 
 void Serializer::writeComponent(const libcellml::ComponentPtr &comp, int indent) {
@@ -200,7 +197,7 @@ void Serializer::writeComponent(const libcellml::ComponentPtr &comp, int indent)
 
     // Variables.
     for (size_t i = 0; i < comp->variableCount(); ++i)
-        writeVariable(comp->variable(i), indent + 1);
+        writeVariable(comp->variable(i), comp, indent + 1);
 
     // Equations (from MathML).
     if (!comp->math().empty()) {
@@ -214,25 +211,40 @@ void Serializer::writeComponent(const libcellml::ComponentPtr &comp, int indent)
         writeResets(comp, indent + 1);
     }
 
-    writeLine("}", indent);
-
-    // Write child components (for encapsulated components that are nested in
-    // the model hierarchy).
+    // Nested child components.
     for (size_t i = 0; i < comp->componentCount(); ++i) {
-        if (comp->component(i)->isImport()) continue;
+        auto child = comp->component(i);
+        if (child->isImport()) continue;
         newline();
-        writeComponent(comp->component(i), indent);
+        writeComponent(child, indent + 1);
     }
+
+    writeLine("}", indent);
 }
 
 // ===================================================================
-//  Variable
+//  Variable  —  either definition (units) or connection (comp.var)
 // ===================================================================
 
-void Serializer::writeVariable(const libcellml::VariablePtr &var, int indent) {
+void Serializer::writeVariable(const libcellml::VariablePtr &var,
+                                const libcellml::ComponentPtr &ownerComp,
+                                int indent) {
+    // Determine if this variable should be written as a connection reference.
+    if (var->equivalentVariableCount() > 0 && var->initialValue().empty()) {
+        auto defined = getDefinedVarNames(ownerComp);
+        if (defined.find(var->name()) == defined.end()) {
+            // Not defined by any equation → write as connection.
+            auto [compName, varName] = findConnectionTarget(var, ownerComp);
+            if (!compName.empty()) {
+                writeLine(var->name() + ": " + compName + "." + varName, indent);
+                return;
+            }
+        }
+    }
+
+    // Write as a definition with units.
     std::string line = var->name() + ": ";
 
-    // Determine text unit.
     auto units = var->units();
     std::string unitText;
     if (units) {
@@ -254,10 +266,108 @@ void Serializer::writeVariable(const libcellml::VariablePtr &var, int indent) {
 }
 
 // ===================================================================
+//  Connection detection helpers
+// ===================================================================
+
+std::set<std::string> Serializer::getDefinedVarNames(
+    const libcellml::ComponentPtr &comp) {
+    auto it = definedVarsCache_.find(comp->name());
+    if (it != definedVarsCache_.end()) return it->second;
+
+    std::set<std::string> names;
+    std::string mathml = comp->math();
+    if (!mathml.empty()) {
+        std::vector<MathError> errors;
+        auto equations = mathMLToEquations(mathml, &errors);
+
+        for (auto &[lhs, rhs] : equations) {
+            if (!lhs) continue;
+
+            // Simple identifier on LHS: x = ...
+            if (lhs->kind == ExprKind::Identifier)
+                names.insert(static_cast<IdentifierExpr *>(lhs.get())->name);
+
+            // Look for derivatives anywhere in LHS.
+            std::function<void(const Expr *)> findDerivs;
+            findDerivs = [&](const Expr *e) {
+                if (!e) return;
+                if (e->kind == ExprKind::Derivative) {
+                    auto *d = static_cast<const DerivativeExpr *>(e);
+                    names.insert(d->variable); // state variable
+                    names.insert(d->bvar);     // bound variable (e.g. t)
+                    return;
+                }
+                if (e->kind == ExprKind::BinaryOp) {
+                    auto *b = static_cast<const BinaryOpExpr *>(e);
+                    findDerivs(b->left.get());
+                    findDerivs(b->right.get());
+                }
+                if (e->kind == ExprKind::UnaryOp) {
+                    auto *u = static_cast<const UnaryOpExpr *>(e);
+                    findDerivs(u->operand.get());
+                }
+            };
+            findDerivs(lhs.get());
+        }
+    }
+
+    definedVarsCache_[comp->name()] = names;
+    return names;
+}
+
+std::pair<std::string, std::string> Serializer::findConnectionTarget(
+    const libcellml::VariablePtr &var,
+    const libcellml::ComponentPtr &ownerComp) {
+    // BFS through the equivalence chain to find the "defining" variable
+    // (the one with an initial value or computed by an equation).
+    std::set<libcellml::VariablePtr> visited;
+    std::vector<libcellml::VariablePtr> queue;
+
+    for (size_t i = 0; i < var->equivalentVariableCount(); ++i)
+        queue.push_back(var->equivalentVariable(i));
+    visited.insert(var);
+
+    size_t head = 0;
+    while (head < queue.size()) {
+        auto eqVar = queue[head++];
+        if (visited.count(eqVar)) continue;
+        visited.insert(eqVar);
+
+        auto eqComp = std::dynamic_pointer_cast<libcellml::Component>(
+            eqVar->parent());
+        if (!eqComp) continue;
+
+        // Is this variable a "definition"?
+        if (!eqVar->initialValue().empty()) {
+            return {eqComp->name(), eqVar->name()};
+        }
+        auto defined = getDefinedVarNames(eqComp);
+        if (defined.count(eqVar->name())) {
+            return {eqComp->name(), eqVar->name()};
+        }
+
+        // Enqueue further equivalences.
+        for (size_t i = 0; i < eqVar->equivalentVariableCount(); ++i)
+            queue.push_back(eqVar->equivalentVariable(i));
+    }
+
+    // No definition found — return the first direct equivalent.
+    if (var->equivalentVariableCount() > 0) {
+        auto eqVar = var->equivalentVariable(0);
+        auto eqComp = std::dynamic_pointer_cast<libcellml::Component>(
+            eqVar->parent());
+        if (eqComp)
+            return {eqComp->name(), eqVar->name()};
+    }
+    return {"", ""};
+}
+
+// ===================================================================
 //  Equations (from MathML → text)
 // ===================================================================
 
-void Serializer::writeEquations(const libcellml::ComponentPtr &comp, int indent) {
+void Serializer::writeEquations(const libcellml::ComponentPtr &comp,
+                                 int indent) {
     std::string mathml = comp->math();
     if (mathml.empty()) return;
 
@@ -309,14 +419,12 @@ void Serializer::writeResets(const libcellml::ComponentPtr &comp, int indent) {
                          + " at order " + std::to_string(reset->order())
                          + " when ";
 
-        // Parse test value MathML → expression.
         std::string testMathML = reset->testValue();
         if (!testMathML.empty()) {
             auto eqs = mathMLToEquations(testMathML);
             if (!eqs.empty() && eqs[0].first) {
                 line += exprToText(eqs[0].first.get(), 0);
             } else {
-                // Try as single expression.
                 auto expr = mathMLFragmentToExpr(testMathML);
                 if (expr) line += exprToText(expr.get(), 0);
                 else line += "???";
@@ -326,7 +434,6 @@ void Serializer::writeResets(const libcellml::ComponentPtr &comp, int indent) {
         line += " {";
         writeLine(line, indent);
 
-        // Parse reset value MathML.
         std::string resetMathML = reset->resetValue();
         if (!resetMathML.empty()) {
             auto eqs = mathMLToEquations(resetMathML);
@@ -341,81 +448,10 @@ void Serializer::writeResets(const libcellml::ComponentPtr &comp, int indent) {
 }
 
 // ===================================================================
-//  Connections (variable equivalences → map statements)
-// ===================================================================
-
-void Serializer::writeConnections(const libcellml::ModelPtr &model) {
-    // Collect all equivalences to avoid duplicates.
-    std::set<std::pair<std::string, std::string>> written;
-
-    std::function<void(const libcellml::ComponentPtr &)> walkComponent;
-    walkComponent = [&](const libcellml::ComponentPtr &comp) {
-        for (size_t vi = 0; vi < comp->variableCount(); ++vi) {
-            auto var = comp->variable(vi);
-            for (size_t ei = 0; ei < var->equivalentVariableCount(); ++ei) {
-                auto eqVar = var->equivalentVariable(ei);
-                if (!eqVar) continue;
-
-                auto eqComp = std::dynamic_pointer_cast<libcellml::Component>(eqVar->parent());
-                if (!eqComp) continue;
-
-                // Create a canonical key to avoid writing both directions.
-                std::string key1 = comp->name() + "." + var->name();
-                std::string key2 = eqComp->name() + "." + eqVar->name();
-                auto canonKey = (key1 < key2)
-                    ? std::make_pair(key1, key2)
-                    : std::make_pair(key2, key1);
-
-                if (written.count(canonKey)) continue;
-                written.insert(canonKey);
-
-                writeLine("map " + key1 + " <-> " + key2);
-            }
-        }
-
-        // Recurse into child components.
-        for (size_t ci = 0; ci < comp->componentCount(); ++ci)
-            walkComponent(comp->component(ci));
-    };
-
-    bool hasConnections = false;
-    for (size_t i = 0; i < model->componentCount(); ++i) {
-        walkComponent(model->component(i));
-        if (!written.empty() && !hasConnections) {
-            hasConnections = true;
-        }
-    }
-    if (hasConnections) newline();
-}
-
-// ===================================================================
-//  Encapsulation (hierarchy → group statements)
-// ===================================================================
-
-void Serializer::writeEncapsulation(const libcellml::ModelPtr &model) {
-    std::function<void(const libcellml::ComponentPtr &)> writeGroup;
-    writeGroup = [&](const libcellml::ComponentPtr &comp) {
-        if (comp->componentCount() > 0) {
-            write("group " + comp->name() + " contains {\n");
-            for (size_t i = 0; i < comp->componentCount(); ++i)
-                writeLine(comp->component(i)->name(), 1);
-            writeLine("}");
-            newline();
-        }
-        for (size_t i = 0; i < comp->componentCount(); ++i)
-            writeGroup(comp->component(i));
-    };
-
-    for (size_t i = 0; i < model->componentCount(); ++i)
-        writeGroup(model->component(i));
-}
-
-// ===================================================================
 //  Imports
 // ===================================================================
 
-void Serializer::writeImports(const libcellml::ModelPtr &model) {
-    // Group imported entities by their source URL.
+void Serializer::writeImports(const libcellml::ModelPtr &model, int indent) {
     std::map<std::string, std::vector<std::string>> imports;
 
     std::function<void(const libcellml::ComponentPtr &)> walkComp;
@@ -448,10 +484,10 @@ void Serializer::writeImports(const libcellml::ModelPtr &model) {
     }
 
     for (auto &[url, entries] : imports) {
-        writeLine("import \"" + url + "\" {");
+        writeLine("import \"" + url + "\" {", indent);
         for (auto &e : entries)
-            writeLine(e, 1);
-        writeLine("}");
+            writeLine(e, indent + 1);
+        writeLine("}", indent);
         newline();
     }
 }
@@ -460,7 +496,9 @@ void Serializer::writeImports(const libcellml::ModelPtr &model) {
 //  Unit definitions
 // ===================================================================
 
-void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model) {
+void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model,
+                                       int indent) {
+    bool hasCustomUnits = false;
     for (size_t i = 0; i < model->unitsCount(); ++i) {
         auto u = model->units(i);
         if (u->isImport()) continue;
@@ -468,19 +506,11 @@ void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model) {
 
         std::string text = unitsToText(u);
         if (!text.empty() && text != u->name()) {
-            writeLine("unit " + u->name() + " = " + text);
+            writeLine("unit " + u->name() + " = " + text, indent);
         } else {
-            // Cannot express compactly — write as custom definition.
-            writeLine("unit " + u->name() + " = " + u->name());
+            writeLine("unit " + u->name() + " = " + u->name(), indent);
         }
-    }
-    bool hasCustomUnits = false;
-    for (size_t i = 0; i < model->unitsCount(); ++i) {
-        auto u = model->units(i);
-        if (!u->isImport() && !isStandardUnit(u->name())) {
-            hasCustomUnits = true;
-            break;
-        }
+        hasCustomUnits = true;
     }
     if (hasCustomUnits) newline();
 }
