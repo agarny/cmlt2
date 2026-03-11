@@ -6,7 +6,7 @@
 // =====================================================================
 
 HodgkinHuxley1952 {
-  component membrane {
+  membrane {
     V: mV = -75.0               // membrane potential
     t: ms                       // time
     Cm: uF/cm^2 = 1.0           // membrane capacitance
@@ -19,7 +19,7 @@ HodgkinHuxley1952 {
 
     // ----- Sodium channel -----
 
-    component sodium_channel {
+    sodium_channel {
       V: membrane.V               // membrane potential
       I_Na: uA/cm^2               // sodium current
       g_Na: mS/cm^2 = 120.0       // maximum conductance
@@ -29,7 +29,7 @@ HodgkinHuxley1952 {
 
       I_Na = g_Na * m^3 * h * (V - E_Na)
 
-      component sodium_channel_m_gate {
+      sodium_channel_m_gate {
         V: membrane.V            // membrane potential
         t: membrane.t            // time
         m: dimensionless = 0.05  // activation gating variable
@@ -44,7 +44,7 @@ HodgkinHuxley1952 {
         beta_m = 4.0 * exp(V / 18)
       }
 
-      component sodium_channel_h_gate {
+      sodium_channel_h_gate {
         V: membrane.V           // membrane potential
         t: membrane.t           // time
         h: dimensionless = 0.6  // inactivation gating variable
@@ -59,7 +59,7 @@ HodgkinHuxley1952 {
 
     // ----- Potassium channel -----
 
-    component potassium_channel {
+    potassium_channel {
       V: membrane.V                  // membrane potential
       I_K: uA/cm^2                   // potassium current
       g_K: mS/cm^2 = 36.0            // maximum conductance
@@ -68,7 +68,7 @@ HodgkinHuxley1952 {
 
       I_K = g_K * n^4 * (V - E_K)
 
-      component potassium_channel_n_gate {
+      potassium_channel_n_gate {
         V: membrane.V             // membrane potential
         t: membrane.t             // time
         n: dimensionless = 0.325  // activation gating variable
@@ -86,7 +86,7 @@ HodgkinHuxley1952 {
 
     // ----- Leak channel -----
 
-    component leak_channel {
+    leak_channel {
       V: membrane.V       // membrane potential
       I_L: uA/cm^2        // leak current
       g_L: mS/cm^2 = 0.3  // leak conductance

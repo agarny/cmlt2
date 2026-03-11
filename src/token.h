@@ -16,11 +16,6 @@ enum class TokenType {
     Identifier,     // V, I_Na, membrane, etc.
 
     // Keywords
-    Model,          // model
-    Component,      // component
-    Map,            // map
-    Group,          // group
-    Contains,       // contains
     Import,         // import
     As,             // as
     Unit,           // unit
@@ -48,7 +43,6 @@ enum class TokenType {
     Slash,          // /
     Caret,          // ^
     Equals,         // =
-    Arrow,          // <->
     EqEq,           // ==
     NotEq,          // !=
     Less,           // <
@@ -82,11 +76,6 @@ inline const char *tokenTypeName(TokenType t) {
         case TokenType::Number:     return "Number";
         case TokenType::String:     return "String";
         case TokenType::Identifier: return "Identifier";
-        case TokenType::Model:      return "model";
-        case TokenType::Component:  return "component";
-        case TokenType::Map:        return "map";
-        case TokenType::Group:      return "group";
-        case TokenType::Contains:   return "contains";
         case TokenType::Import:     return "import";
         case TokenType::As:         return "as";
         case TokenType::Unit:       return "unit";
@@ -110,7 +99,6 @@ inline const char *tokenTypeName(TokenType t) {
         case TokenType::Slash:      return "/";
         case TokenType::Caret:      return "^";
         case TokenType::Equals:     return "=";
-        case TokenType::Arrow:      return "<->";
         case TokenType::EqEq:       return "==";
         case TokenType::NotEq:      return "!=";
         case TokenType::Less:       return "<";

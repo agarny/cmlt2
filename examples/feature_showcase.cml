@@ -1,0 +1,95 @@
+// =====================================================================
+//  Complete Feature Showcase
+//
+//  Demonstrates every CellML Text 2.0 syntax feature:
+//    - Named model block
+//    - Nested components (hierarchy)
+//    - Variable definitions with units and initial values
+//    - Variable connections (dot-notation)
+//    - Algebraic equations
+//    - Differential equations  d(x)/d(t)
+//    - Piecewise expressions   { ... when ... otherwise ... }
+//    - Mathematical functions   exp, sin, sqrt, ln, abs, ...
+//    - Constants                pi, e, true, false
+//    - Logical/comparison ops   and, or, not, ==, !=, <, >, <=, >=
+//    - Custom unit definitions
+//    - Resets
+//    - Comments
+// =====================================================================
+
+FeatureShowcase {
+  // Custom unit definitions
+  unit beats_per_min = 1/60 * Hz
+  unit mM = mmol/L
+
+  // Top-level component with children
+  environment {
+    t: s                      // time (bound variable)
+    heartrate: beats_per_min = 72.0
+
+    // Nested component demonstrating connections and ODEs
+    cell {
+      t: environment.t        // connected to parent's time
+      V: mV = -80.0           // membrane potential
+      Cm: uF/cm^2 = 1.0       // capacitance
+      I_ion: channel.I_ion    // connected to child's current
+
+      Cm * d(V)/d(t) = -I_ion
+
+      channel {
+        V: cell.V              // connected to parent
+        I_ion: uA/cm^2         // total ionic current
+        g: mS/cm^2 = 1.5       // conductance
+        E_rev: mV = -60.0      // reversal potential
+
+        I_ion = g * (V - E_rev)
+      }
+    }
+
+    // Component demonstrating piecewise and math functions
+    stimulus {
+      t: environment.t
+      I: uA/cm^2
+      period: s = 1.0
+      duration: s = 0.001
+      amplitude: uA/cm^2 = 50.0
+
+      // Periodic square pulse
+      I = {
+        amplitude  when t - floor(t / period) * period < duration
+        0.0        otherwise
+      }
+    }
+
+    // Component demonstrating resets
+    counter {
+      t: environment.t
+      count: dimensionless = 0.0
+      V: mV = 0.0
+
+      // Reset count to zero when it exceeds 10
+      reset count at order 1 when count > 10.0 {
+        count = 0.0
+      }
+    }
+
+    // Component demonstrating various math operations
+    math_demo {
+      x: dimensionless = 1.0
+      y: dimensionless
+      z: dimensionless
+      w: dimensionless
+      flag: dimensionless
+
+      // Demonstrating operators and functions
+      y = sin(x) + cos(x) + exp(-x)
+      z = sqrt(abs(x)) + ln(x + 1.0)
+      w = x^2 + pi * x
+      flag = {
+        1.0  when x > 0.0 and x < 10.0
+        0.0  when x <= 0.0 or not (x == x)
+        -1.0  otherwise
+      }
+    }
+  }
+}

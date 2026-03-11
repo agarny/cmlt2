@@ -101,26 +101,7 @@ libcellml::ModelPtr Parser::parse(const std::string &source) {
 }
 
 void Parser::parseModel() {
-    // Support two forms:
-    //   New:    Name { ... }
-    //   Legacy: model Name [{ ... }]
-    if (match(TokenType::Model)) {
-        // Legacy: model Name
-        Token name = expect(TokenType::Identifier, "model name");
-        model_->setName(name.value);
-        skipNewlines();
-        if (match(TokenType::LBrace)) {
-            parseModelBody();
-            expect(TokenType::RBrace, "model body");
-        } else {
-            // Flat legacy format — top-level items until EOF.
-            while (!check(TokenType::Eof)) {
-                parseTopLevel();
-                skipNewlines();
-            }
-        }
-    } else if (check(TokenType::Identifier)) {
-        // New: Name { ... }
+    if (check(TokenType::Identifier)) {
         Token name = advance();
         model_->setName(name.value);
         skipNewlines();
@@ -143,18 +124,17 @@ void Parser::parseModelBody() {
 
 void Parser::parseTopLevel() {
     skipNewlines();
-    if (check(TokenType::Eof)) return;
+    if (check(TokenType::Eof) || check(TokenType::RBrace)) return;
 
-    switch (current().type) {
-    case TokenType::Component:  parseComponent(nullptr);  break;
-    case TokenType::Map:        parseMapStatement();    break;
-    case TokenType::Group:      parseGroupStatement();  break;
-    case TokenType::Import:     parseImportStatement(); break;
-    case TokenType::Unit:       parseUnitDef();         break;
-    default:
+    if (check(TokenType::Import)) {
+        parseImportStatement();
+    } else if (check(TokenType::Unit)) {
+        parseUnitDef();
+    } else if (check(TokenType::Identifier)) {
+        parseComponent(nullptr);
+    } else {
         error("Unexpected token '" + current().value + "' at top level");
         advance();
-        break;
     }
 }
 
@@ -163,7 +143,6 @@ void Parser::parseTopLevel() {
 // ===================================================================
 
 void Parser::parseComponent(const libcellml::ComponentPtr &parent) {
-    expect(TokenType::Component, "component");
     Token name = expect(TokenType::Identifier, "component name");
     auto comp = libcellml::Component::create(name.value);
 
@@ -189,27 +168,18 @@ void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
         skipNewlines();
         if (check(TokenType::RBrace)) break;
 
-        // Nested component declaration.
-        if (check(TokenType::Component)) {
-            parseComponent(comp);
-            skipNewlines();
-            continue;
-        }
-
-        // Determine if this is a variable declaration, equation, or reset.
+        // Determine if this is a variable declaration, nested component,
+        // equation, or reset.
         if (check(TokenType::Reset)) {
             parseResetStatement(comp);
             continue;
         }
 
         // Variable declaration: IDENTIFIER ":" ...
-        // Equation: expression "=" expression
-        //
-        // We need to look ahead: if we see IDENT followed by ":", it's a var decl.
-        // Otherwise it's an equation.
+        // Nested component:     IDENTIFIER "{" ...
+        // Equation:             expression "=" expression
 
         if (check(TokenType::Identifier)) {
-            // Look ahead for ':' (var decl) vs '=' or other (equation).
             size_t savedPos = pos_;
             Token ident = advance();
             skipNewlines();
@@ -217,6 +187,13 @@ void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
                 // Variable declaration.
                 pos_ = savedPos;
                 parseVarDecl(comp);
+                continue;
+            }
+            if (check(TokenType::LBrace)) {
+                // Nested component: name { ... }
+                pos_ = savedPos;
+                parseComponent(comp);
+                skipNewlines();
                 continue;
             }
             // Restore and parse as equation.
@@ -515,127 +492,6 @@ void Parser::resolveConnections() {
 }
 
 // ===================================================================
-//  map comp1.var1 <-> comp2.var2
-// ===================================================================
-
-void Parser::parseMapStatement() {
-    expect(TokenType::Map, "map statement");
-
-    Token comp1 = expect(TokenType::Identifier, "map component 1");
-    expect(TokenType::Dot, "map");
-    Token var1 = expect(TokenType::Identifier, "map variable 1");
-
-    expect(TokenType::Arrow, "map");
-
-    Token comp2 = expect(TokenType::Identifier, "map component 2");
-    expect(TokenType::Dot, "map");
-    Token var2 = expect(TokenType::Identifier, "map variable 2");
-
-    // Find or create the variables and set equivalence.
-    auto findVar = [&](const std::string &compName,
-                       const std::string &varName) -> libcellml::VariablePtr {
-        // Search all components (including nested) for the named component.
-        std::function<libcellml::ComponentPtr(const libcellml::ComponentPtr &)> findComp;
-        findComp = [&](const libcellml::ComponentPtr &parent) -> libcellml::ComponentPtr {
-            for (size_t i = 0; i < parent->componentCount(); ++i) {
-                auto c = parent->component(i);
-                if (c->name() == compName) return c;
-                auto found = findComp(c);
-                if (found) return found;
-            }
-            return nullptr;
-        };
-
-        // Search top-level model components.
-        libcellml::ComponentPtr comp;
-        for (size_t i = 0; i < model_->componentCount(); ++i) {
-            auto c = model_->component(i);
-            if (c->name() == compName) { comp = c; break; }
-            auto found = findComp(c);
-            if (found) { comp = found; break; }
-        }
-
-        if (!comp) {
-            error("Component '" + compName + "' not found for map");
-            return nullptr;
-        }
-
-        auto v = comp->variable(varName);
-        if (!v) {
-            error("Variable '" + varName + "' not found in component '"
-                  + compName + "'");
-        }
-        return v;
-    };
-
-    auto v1 = findVar(comp1.value, var1.value);
-    auto v2 = findVar(comp2.value, var2.value);
-
-    if (v1 && v2) {
-        libcellml::Variable::addEquivalence(v1, v2);
-    }
-
-    skipNewlines();
-}
-
-// ===================================================================
-//  group <parent> contains { <child> ... }
-// ===================================================================
-
-void Parser::parseGroupStatement() {
-    expect(TokenType::Group, "group statement");
-    Token parentName = expect(TokenType::Identifier, "group parent");
-    expect(TokenType::Contains, "group statement");
-    skipNewlines();
-    expect(TokenType::LBrace, "group body");
-
-    // Find the parent component.
-    libcellml::ComponentPtr parentComp;
-    for (size_t i = 0; i < model_->componentCount(); ++i) {
-        if (model_->component(i)->name() == parentName.value) {
-            parentComp = model_->component(i);
-            break;
-        }
-    }
-    if (!parentComp) {
-        error("Component '" + parentName.value + "' not found for group");
-    }
-
-    skipNewlines();
-    while (!check(TokenType::RBrace) && !check(TokenType::Eof)) {
-        skipNewlines();
-        if (check(TokenType::RBrace)) break;
-
-        Token childName = expect(TokenType::Identifier, "group child");
-
-        if (parentComp) {
-            // Find the child component at top level and move it under parent.
-            libcellml::ComponentPtr childComp;
-            for (size_t i = 0; i < model_->componentCount(); ++i) {
-                if (model_->component(i)->name() == childName.value) {
-                    childComp = model_->component(i);
-                    break;
-                }
-            }
-            if (childComp) {
-                // Take it from the model and add under parent.
-                model_->removeComponent(childName.value);
-                parentComp->addComponent(childComp);
-            } else {
-                // Maybe already nested? Check recursively.
-                error("Component '" + childName.value
-                      + "' not found at top level for group");
-            }
-        }
-
-        skipNewlines();
-    }
-
-    expect(TokenType::RBrace, "group body");
-    skipNewlines();
-}
-
-// ===================================================================
 //  import "url" { component <name> [as <local>]; ... }
 // ===================================================================
 
@@ -653,7 +509,8 @@ void Parser::parseImportStatement() {
         skipNewlines();
         if (check(TokenType::RBrace)) break;
 
-        if (match(TokenType::Component)) {
+        if (check(TokenType::Identifier) && current().value == "component") {
+            advance(); // consume "component"
             Token name = expect(TokenType::Identifier, "import component name");
             std::string localName = name.value;
             if (match(TokenType::As)) {

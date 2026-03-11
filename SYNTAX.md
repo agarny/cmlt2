@@ -8,7 +8,7 @@ mathematical background, requiring **no knowledge of CellML or XML**.
 
 ```
 HodgkinHuxley1952 {
-  component membrane {
+  membrane {
     V: mV = -75.0
     t: ms
     Cm: uF/cm^2 = 1.0
@@ -17,7 +17,7 @@ HodgkinHuxley1952 {
 
     Cm * d(V)/d(t) = -(I_Na + I_K)
 
-    component sodium_channel {
+    sodium_channel {
       V: membrane.V
       g_Na: mS/cm^2 = 120.0
       E_Na: mV = 50.0
@@ -31,7 +31,7 @@ HodgkinHuxley1952 {
 
 ---
 
-## 1. Model Declaration
+## 1. Model
 
 Every file wraps the entire model in a named block:
 
@@ -42,28 +42,30 @@ Every file wraps the entire model in a named block:
 ```
 
 The name is a plain identifier (letters, digits, underscores).
-For backward compatibility, `model <name>` (without braces) is also accepted.
 
 ---
 
 ## 2. Components
 
-Components group variables, equations, and nested child components:
+Components are named blocks nested inside the model (or inside other
+components for hierarchy):
 
 ```
-component <name> {
+<name> {
     <variable declarations>
     <equations>
     <nested components>
 }
 ```
 
-Components can be nested to define a hierarchy (encapsulation), removing the
-need for separate `group` statements:
+Nesting defines the component hierarchy (encapsulation) directly:
 
 ```
-component parent {
-    component child {
+membrane {
+    sodium_channel {
+        ...
+    }
+    potassium_channel {
         ...
     }
 }
@@ -95,7 +97,7 @@ ratio: 1                // dimensionless
 
 This declares a variable that is connected to (equivalent to) the named
 variable in another component. Units are inherited automatically from the
-source variable. This replaces explicit `map` statements.
+source variable.
 
 Examples:
 ```
@@ -250,41 +252,7 @@ x = {
 
 ---
 
-## 7. Component Hierarchy (Encapsulation)
-
-Nest components to define parent-child relationships:
-
-```
-component membrane {
-    V: mV = -75.0
-
-    component sodium_channel {
-        V: membrane.V
-        ...
-    }
-
-    component potassium_channel {
-        V: membrane.V
-        ...
-    }
-}
-```
-
-Nesting eliminates the need for separate `group` statements. The hierarchy
-is encoded directly in the structure.
-
-### Legacy Syntax (still accepted)
-
-For backward compatibility, `map` and `group` statements are still parsed:
-
-```
-map membrane.V <-> sodium_channel.V
-group membrane contains { sodium_channel }
-```
-
----
-
-## 8. Imports
+## 7. Imports
 
 Reuse components and units from other files:
 
@@ -298,12 +266,12 @@ import "path/to/model.cellml" {
 
 ---
 
-## 9. Resets
+## 8. Resets
 
 Define reset behaviour inside components:
 
 ```
-component stimulus {
+stimulus {
     V: mV
     V_threshold: mV = 0
     V_reset: mV = -75
@@ -316,7 +284,7 @@ component stimulus {
 
 ---
 
-## 10. Comments
+## 9. Comments
 
 Single-line comments with `//`:
 
@@ -327,15 +295,14 @@ V: mV = -75.0  // membrane potential
 
 ---
 
-## 11. Grammar Summary (Informal)
+## 10. Grammar Summary (Informal)
 
 ```
 file          = model_block
 model_block   = IDENTIFIER "{" { top_level_item } "}"
-              | "model" IDENTIFIER [ "{" { top_level_item } "}" ]
-top_level_item= component | map_stmt | group_stmt | import_stmt | unit_def
-component     = "component" IDENTIFIER "{" { comp_item } "}"
-comp_item     = var_decl | equation | reset_stmt | component
+top_level_item= block | import_stmt | unit_def
+block         = IDENTIFIER "{" { block_item } "}"
+block_item    = var_decl | equation | reset_stmt | block
 var_decl      = IDENTIFIER ":" ( unit_expr [ "=" expression ] | connection )
 connection    = IDENTIFIER "." IDENTIFIER
 equation      = expression "=" expression
@@ -358,9 +325,6 @@ piecewise     = "{" piece { piece } otherwise "}"
 piece         = expression "when" expression
 otherwise     = expression "otherwise"
 constant      = "pi" | "e" | "inf" | "nan" | "true" | "false"
-map_stmt      = "map" dotted_name "<->" dotted_name
-dotted_name   = IDENTIFIER "." IDENTIFIER
-group_stmt    = "group" IDENTIFIER "contains" "{" { IDENTIFIER } "}"
 import_stmt   = "import" STRING "{" { import_item } "}"
 import_item   = ("component" | "unit") IDENTIFIER [ "as" IDENTIFIER ]
 unit_def      = "unit" IDENTIFIER "=" unit_expr

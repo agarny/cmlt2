@@ -45,8 +45,6 @@ private:
     void parseModelBody();
     void parseTopLevel();
     void parseComponent(const libcellml::ComponentPtr &parent);
-    void parseMapStatement();
-    void parseGroupStatement();
     void parseImportStatement();
     void parseUnitDef();
 

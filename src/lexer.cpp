@@ -14,11 +14,6 @@ namespace cellmltext {
 // ===================================================================
 
 static const std::unordered_map<std::string, TokenType> kKeywords = {
-    {"model",         TokenType::Model},
-    {"component",     TokenType::Component},
-    {"map",           TokenType::Map},
-    {"group",         TokenType::Group},
-    {"contains",      TokenType::Contains},
     {"import",        TokenType::Import},
     {"as",            TokenType::As},
     {"unit",          TokenType::Unit},
@@ -221,12 +216,6 @@ Token Lexer::nextToken() {
         return nextToken();
 
     case '<':
-        if (match('-')) {
-            if (match('>'))
-                return Token{TokenType::Arrow, "<->", startLine, startCol};
-            errors_.push_back({startLine, startCol, "Expected '>' to complete '<->'"});
-            return nextToken();
-        }
         if (match('='))
             return Token{TokenType::LessEq, "<=", startLine, startCol};
         return Token{TokenType::Less, "<", startLine, startCol};

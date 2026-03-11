@@ -1,0 +1,21 @@
+// =====================================================================
+//  Custom Units & Math Functions Example
+//
+//  Demonstrates custom unit definitions and mathematical functions.
+// =====================================================================
+
+PharmacokineticModel {
+  unit mg = 1e-3 * g
+  unit mg_per_L = mg/L
+  unit per_hour = 1/h
+
+  body {
+    C: mg_per_L = 100.0    // drug concentration
+    t: h                   // time in hours
+    k_e: per_hour = 0.1    // elimination rate constant
+    C_half: mg_per_L       // half of the concentration
+
+    d(C)/d(t) = -k_e * C
+    C_half = C / 2.0
+  }
+}

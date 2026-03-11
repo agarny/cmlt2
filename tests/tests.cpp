@@ -14,7 +14,9 @@
 
 #include <libcellml/component.h>
 #include <libcellml/model.h>
+#include <libcellml/parser.h>
 #include <libcellml/printer.h>
+#include <libcellml/reset.h>
 #include <libcellml/variable.h>
 
 #include <cassert>
@@ -66,22 +68,21 @@ static std::string gCurrentSuite;
 static void testLexerBasic() {
     SUITE("Lexer/Basic");
 
-    Lexer lex("model HodgkinHuxley1952");
+    Lexer lex("TestModel { }");
     auto tokens = lex.tokenize();
 
-    CHECK(tokens.size() >= 3); // model, identifier, EOF
-    CHECK_EQ(tokens[0].type, TokenType::Model);
-    CHECK_EQ(tokens[1].type, TokenType::Identifier);
-    CHECK_EQ(tokens[1].value, std::string("HodgkinHuxley1952"));
+    CHECK(tokens.size() >= 4); // identifier, {, }, EOF
+    CHECK_EQ(tokens[0].type, TokenType::Identifier);
+    CHECK_EQ(tokens[0].value, std::string("TestModel"));
+    CHECK_EQ(tokens[1].type, TokenType::LBrace);
 }
 
 static void testLexerOperators() {
     SUITE("Lexer/Operators");
 
-    Lexer lex("a + b * c / d ^ 2 == e <-> f");
+    Lexer lex("a + b * c / d ^ 2 == e");
     auto tokens = lex.tokenize();
 
-    // a + b * c / d ^ 2 == e <-> f
     CHECK_EQ(tokens[0].type, TokenType::Identifier); // a
     CHECK_EQ(tokens[1].type, TokenType::Plus);
     CHECK_EQ(tokens[2].type, TokenType::Identifier); // b
@@ -93,8 +94,6 @@ static void testLexerOperators() {
     CHECK_EQ(tokens[8].type, TokenType::Number);     // 2
     CHECK_EQ(tokens[9].type, TokenType::EqEq);
     CHECK_EQ(tokens[10].type, TokenType::Identifier); // e
-    CHECK_EQ(tokens[11].type, TokenType::Arrow);
-    CHECK_EQ(tokens[12].type, TokenType::Identifier); // f
 }
 
 static void testLexerNumbers() {
@@ -123,30 +122,41 @@ static void testLexerString() {
 static void testLexerKeywords() {
     SUITE("Lexer/Keywords");
 
-    Lexer lex("model component map group contains import as unit reset when at order otherwise and or not true false pi inf nan");
+    Lexer lex("import as unit reset when at order otherwise and or not true false pi inf nan");
     auto tokens = lex.tokenize();
 
-    CHECK_EQ(tokens[0].type, TokenType::Model);
-    CHECK_EQ(tokens[1].type, TokenType::Component);
-    CHECK_EQ(tokens[2].type, TokenType::Map);
-    CHECK_EQ(tokens[3].type, TokenType::Group);
-    CHECK_EQ(tokens[4].type, TokenType::Contains);
-    CHECK_EQ(tokens[5].type, TokenType::Import);
-    CHECK_EQ(tokens[6].type, TokenType::As);
-    CHECK_EQ(tokens[7].type, TokenType::Unit);
-    CHECK_EQ(tokens[8].type, TokenType::Reset);
-    CHECK_EQ(tokens[9].type, TokenType::When);
-    CHECK_EQ(tokens[10].type, TokenType::At);
-    CHECK_EQ(tokens[11].type, TokenType::Order);
-    CHECK_EQ(tokens[12].type, TokenType::Otherwise);
-    CHECK_EQ(tokens[13].type, TokenType::And);
-    CHECK_EQ(tokens[14].type, TokenType::Or);
-    CHECK_EQ(tokens[15].type, TokenType::Not);
-    CHECK_EQ(tokens[16].type, TokenType::True);
-    CHECK_EQ(tokens[17].type, TokenType::False);
-    CHECK_EQ(tokens[18].type, TokenType::Pi);
-    CHECK_EQ(tokens[19].type, TokenType::Inf);
-    CHECK_EQ(tokens[20].type, TokenType::Nan);
+    CHECK_EQ(tokens[0].type, TokenType::Import);
+    CHECK_EQ(tokens[1].type, TokenType::As);
+    CHECK_EQ(tokens[2].type, TokenType::Unit);
+    CHECK_EQ(tokens[3].type, TokenType::Reset);
+    CHECK_EQ(tokens[4].type, TokenType::When);
+    CHECK_EQ(tokens[5].type, TokenType::At);
+    CHECK_EQ(tokens[6].type, TokenType::Order);
+    CHECK_EQ(tokens[7].type, TokenType::Otherwise);
+    CHECK_EQ(tokens[8].type, TokenType::And);
+    CHECK_EQ(tokens[9].type, TokenType::Or);
+    CHECK_EQ(tokens[10].type, TokenType::Not);
+    CHECK_EQ(tokens[11].type, TokenType::True);
+    CHECK_EQ(tokens[12].type, TokenType::False);
+    CHECK_EQ(tokens[13].type, TokenType::Pi);
+    CHECK_EQ(tokens[14].type, TokenType::Inf);
+    CHECK_EQ(tokens[15].type, TokenType::Nan);
+}
+
+static void testLexerFormerKeywords() {
+    SUITE("Lexer/FormerKeywords");
+
+    // model, component, map, group, contains are now regular identifiers
+    Lexer lex("model component map group contains");
+    auto tokens = lex.tokenize();
+
+    CHECK_EQ(tokens[0].type, TokenType::Identifier);
+    CHECK_EQ(tokens[0].value, std::string("model"));
+    CHECK_EQ(tokens[1].type, TokenType::Identifier);
+    CHECK_EQ(tokens[1].value, std::string("component"));
+    CHECK_EQ(tokens[2].type, TokenType::Identifier);
+    CHECK_EQ(tokens[3].type, TokenType::Identifier);
+    CHECK_EQ(tokens[4].type, TokenType::Identifier);
 }
 
 // =====================================================================
@@ -299,7 +309,7 @@ static void testParserMinimal() {
 
     std::string input = R"(
 TestModel {
-    component membrane {
+    membrane {
         V: mV = -75.0
         t: ms
     }
@@ -323,31 +333,12 @@ TestModel {
     }
 }
 
-static void testParserLegacy() {
-    SUITE("Parser/Legacy");
-
-    std::string input = R"(
-model TestModel
-
-component membrane {
-    V: mV = -75.0
-    t: ms
-}
-)";
-
-    Parser parser;
-    auto model = parser.parse(input);
-    CHECK(model != nullptr);
-    CHECK_EQ(model->name(), std::string("TestModel"));
-    CHECK_EQ(model->componentCount(), size_t(1));
-}
-
 static void testParserEquation() {
     SUITE("Parser/Equation");
 
     std::string input = R"(
 Test {
-    component C {
+    C {
         x: dimensionless
         y: dimensionless
 
@@ -361,7 +352,6 @@ Test {
     auto comp = model->component(0);
     CHECK(!comp->math().empty());
 
-    // The math should contain valid MathML.
     std::string math = comp->math();
     CHECK(math.find("<math") != std::string::npos);
     CHECK(math.find("<apply><eq/>") != std::string::npos);
@@ -372,7 +362,7 @@ static void testParserDerivative() {
 
     std::string input = R"(
 Test {
-    component C {
+    C {
         V: mV
         t: ms
 
@@ -394,7 +384,7 @@ static void testParserPiecewise() {
 
     std::string input = R"(
 Test {
-    component C {
+    C {
         x: dimensionless
         V: mV
 
@@ -415,80 +405,15 @@ Test {
     CHECK(math.find("<otherwise>") != std::string::npos);
 }
 
-static void testParserMap() {
-    SUITE("Parser/Map");
-
-    // Legacy map syntax (still supported).
-    std::string input = R"(
-model Test
-
-component A {
-    V: mV
-}
-
-component B {
-    V: mV
-}
-
-map A.V <-> B.V
-)";
-
-    Parser parser;
-    auto model = parser.parse(input);
-    auto compA = model->component("A");
-    auto compB = model->component("B");
-    CHECK(compA != nullptr);
-    CHECK(compB != nullptr);
-
-    if (compA && compB) {
-        auto vA = compA->variable("V");
-        CHECK(vA != nullptr);
-        if (vA)
-            CHECK(vA->equivalentVariableCount() > 0);
-    }
-}
-
-static void testParserGroup() {
-    SUITE("Parser/Group");
-
-    // Legacy group syntax (still supported).
-    std::string input = R"(
-model Test
-
-component parent {
-    x: dimensionless
-}
-
-component child {
-    y: dimensionless
-}
-
-group parent contains {
-    child
-}
-)";
-
-    Parser parser;
-    auto model = parser.parse(input);
-
-    auto parentComp = model->component("parent");
-    CHECK(parentComp != nullptr);
-    if (parentComp) {
-        CHECK_EQ(parentComp->componentCount(), size_t(1));
-        if (parentComp->componentCount() > 0)
-            CHECK_EQ(parentComp->component(0)->name(), std::string("child"));
-    }
-}
-
 static void testParserNested() {
     SUITE("Parser/Nested");
 
     std::string input = R"(
 Test {
-    component parent {
+    parent {
         V: mV = -75.0
 
-        component child {
+        child {
             V: parent.V
         }
     }
@@ -520,11 +445,11 @@ static void testParserConnection() {
 
     std::string input = R"(
 Test {
-    component membrane {
+    membrane {
         V: mV = -75.0
         I: channel.I
 
-        component channel {
+        channel {
             V: membrane.V
             I: uA/cm^2
 
@@ -539,15 +464,171 @@ Test {
     auto membrane = model->component(0);
     auto channel = membrane->component(0);
 
-    // Check that membrane.I is connected to channel.I
+    // membrane.I connected to channel.I
     auto memI = membrane->variable("I");
     CHECK(memI != nullptr);
     if (memI) CHECK(memI->equivalentVariableCount() > 0);
 
-    // Check that channel.V is connected to membrane.V
+    // channel.V connected to membrane.V
     auto chanV = channel->variable("V");
     CHECK(chanV != nullptr);
     if (chanV) CHECK(chanV->equivalentVariableCount() > 0);
+}
+
+static void testParserReset() {
+    SUITE("Parser/Reset");
+
+    std::string input = R"(
+Test {
+    neuron {
+        V: mV = -65.0
+        V_thresh: mV = -50.0
+        V_reset: mV = -65.0
+
+        reset V at order 1 when V > V_thresh {
+            V = V_reset
+        }
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(parser.errors().empty());
+
+    auto comp = model->component(0);
+    CHECK_EQ(comp->resetCount(), size_t(1));
+
+    auto reset = comp->reset(0);
+    CHECK(reset != nullptr);
+    if (reset) {
+        CHECK_EQ(reset->order(), 1);
+        auto var = reset->variable();
+        CHECK(var != nullptr);
+        if (var) CHECK_EQ(var->name(), std::string("V"));
+    }
+}
+
+static void testParserCustomUnit() {
+    SUITE("Parser/CustomUnit");
+
+    std::string input = R"(
+Test {
+    unit beats_per_min = 1/60 * Hz
+
+    heart {
+        rate: beats_per_min = 72.0
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(parser.errors().empty());
+
+    // Check that the custom unit was created.
+    CHECK(model->unitsCount() > 0);
+    bool found = false;
+    for (size_t i = 0; i < model->unitsCount(); ++i) {
+        if (model->units(i)->name() == "beats_per_min") {
+            found = true;
+            break;
+        }
+    }
+    CHECK(found);
+
+    auto comp = model->component(0);
+    auto rate = comp->variable("rate");
+    CHECK(rate != nullptr);
+    if (rate) CHECK_EQ(rate->initialValue(), std::string("72.0"));
+}
+
+static void testParserMultipleComponents() {
+    SUITE("Parser/MultipleComponents");
+
+    std::string input = R"(
+Test {
+    A {
+        x: dimensionless = 1.0
+    }
+    B {
+        y: dimensionless = 2.0
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK_EQ(model->componentCount(), size_t(2));
+    CHECK_EQ(model->component(0)->name(), std::string("A"));
+    CHECK_EQ(model->component(1)->name(), std::string("B"));
+}
+
+static void testParserDeepNesting() {
+    SUITE("Parser/DeepNesting");
+
+    std::string input = R"(
+Test {
+    L1 {
+        x: mV = 1.0
+
+        L2 {
+            x: L1.x
+
+            L3 {
+                x: L1.x
+            }
+        }
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(parser.errors().empty());
+
+    auto L1 = model->component(0);
+    CHECK_EQ(L1->componentCount(), size_t(1));
+    auto L2 = L1->component(0);
+    CHECK_EQ(L2->componentCount(), size_t(1));
+    auto L3 = L2->component(0);
+    CHECK_EQ(L3->name(), std::string("L3"));
+
+    // L3's x should be connected (through equivalence chain)
+    auto xL3 = L3->variable("x");
+    CHECK(xL3 != nullptr);
+    if (xL3) CHECK(xL3->equivalentVariableCount() > 0);
+}
+
+static void testParserMathFunctions() {
+    SUITE("Parser/MathFunctions");
+
+    std::string input = R"(
+Test {
+    math {
+        x: dimensionless = 1.0
+        y: dimensionless
+        z: dimensionless
+
+        y = sin(x) + cos(x) + exp(-x) + sqrt(abs(x))
+        z = ln(x + 1) + min(x, 2.0) + max(x, 0.0)
+    }
+}
+)";
+
+    Parser parser;
+    auto model = parser.parse(input);
+    CHECK(parser.errors().empty());
+
+    auto comp = model->component(0);
+    std::string math = comp->math();
+    CHECK(math.find("<sin/>") != std::string::npos);
+    CHECK(math.find("<cos/>") != std::string::npos);
+    CHECK(math.find("<exp/>") != std::string::npos);
+    CHECK(math.find("<abs/>") != std::string::npos);
+    CHECK(math.find("<ln/>") != std::string::npos);
+    CHECK(math.find("<min/>") != std::string::npos);
+    CHECK(math.find("<max/>") != std::string::npos);
 }
 
 // =====================================================================
@@ -569,14 +650,15 @@ static void testSerializerBasic() {
     std::string text = ser.serialize(model);
 
     CHECK(text.find("TestModel {") != std::string::npos);
-    CHECK(text.find("component membrane") != std::string::npos);
+    CHECK(text.find("membrane {") != std::string::npos);
     CHECK(text.find("V:") != std::string::npos);
+    // Should NOT contain the word "component"
+    CHECK(text.find("component") == std::string::npos);
 }
 
 static void testSerializerConnection() {
     SUITE("Serializer/Connection");
 
-    // Build a model with a parent-child connection.
     auto model = libcellml::Model::create("ConnTest");
     auto parent = libcellml::Component::create("membrane");
     auto child = libcellml::Component::create("channel");
@@ -608,6 +690,71 @@ static void testSerializerConnection() {
     CHECK(text.find("I: A") != std::string::npos);
 }
 
+static void testSerializerNested() {
+    SUITE("Serializer/Nested");
+
+    auto model = libcellml::Model::create("NestTest");
+    auto parent = libcellml::Component::create("parent");
+    auto child = libcellml::Component::create("child");
+    auto grandchild = libcellml::Component::create("grandchild");
+
+    auto pv = libcellml::Variable::create("x");
+    pv->setUnits("dimensionless");
+    pv->setInitialValue(1.0);
+    parent->addVariable(pv);
+
+    child->addComponent(grandchild);
+    parent->addComponent(child);
+    model->addComponent(parent);
+
+    Serializer ser;
+    std::string text = ser.serialize(model);
+
+    // Verify nesting structure
+    CHECK(text.find("parent {") != std::string::npos);
+    CHECK(text.find("child {") != std::string::npos);
+    CHECK(text.find("grandchild {") != std::string::npos);
+}
+
+static void testSerializerReset() {
+    SUITE("Serializer/Reset");
+
+    auto model = libcellml::Model::create("ResetTest");
+    auto comp = libcellml::Component::create("neuron");
+
+    auto V = libcellml::Variable::create("V");
+    V->setUnits("volt");
+    V->setInitialValue(-0.065);
+    comp->addVariable(V);
+
+    auto Vreset = libcellml::Variable::create("V_reset");
+    Vreset->setUnits("volt");
+    Vreset->setInitialValue(-0.065);
+    comp->addVariable(Vreset);
+
+    auto reset = libcellml::Reset::create();
+    reset->setVariable(V);
+    reset->setTestVariable(V);
+    reset->setOrder(1);
+    reset->setTestValue(
+        "<math xmlns=\"http://www.w3.org/1998/Math/MathML\""
+        " xmlns:cellml=\"http://www.cellml.org/cellml/2.0#\">"
+        "<apply><gt/><ci>V</ci><cn cellml:units=\"volt\">-0.05</cn></apply>"
+        "</math>");
+    reset->setResetValue(
+        "<math xmlns=\"http://www.w3.org/1998/Math/MathML\""
+        " xmlns:cellml=\"http://www.cellml.org/cellml/2.0#\">"
+        "<ci>V_reset</ci>"
+        "</math>");
+    comp->addReset(reset);
+    model->addComponent(comp);
+
+    Serializer ser;
+    std::string text = ser.serialize(model);
+
+    CHECK(text.find("reset V at order 1 when") != std::string::npos);
+}
+
 // =====================================================================
 //  Round-trip tests
 // =====================================================================
@@ -617,7 +764,7 @@ static void testRoundTripSimple() {
 
     std::string input = R"(
 RoundTripTest {
-    component main {
+    main {
         x: dimensionless = 1.0
         y: dimensionless
 
@@ -639,15 +786,16 @@ RoundTripTest {
 
     // Verify key elements are preserved.
     CHECK(output.find("RoundTripTest") != std::string::npos);
-    CHECK(output.find("component main") != std::string::npos);
+    CHECK(output.find("main {") != std::string::npos);
+    CHECK(output.find("x: dimensionless") != std::string::npos);
 }
 
-static void testRoundTripCellMLXML() {
-    SUITE("RoundTrip/CellML-XML");
+static void testRoundTripTextToXmlToText() {
+    SUITE("RoundTrip/Text→XML→Text");
 
     std::string input = R"(
 Noble62 {
-    component membrane {
+    membrane {
         V: mV = -87.0
         t: ms
         Cm: uF/cm^2 = 12.0
@@ -665,9 +813,191 @@ Noble62 {
     CHECK(!xml.empty());
     for (auto &e : errors)
         std::cerr << "  Error: " << e.message << "\n";
+    CHECK(xml.find("<model") != std::string::npos);
 
-    // Should be valid XML.
-    CHECK(xml.find("<?xml") != std::string::npos || xml.find("<model") != std::string::npos);
+    // CellML XML → Text
+    errors.clear();
+    std::string text = cellMLToText(xml, &errors);
+    CHECK(!text.empty());
+    for (auto &e : errors)
+        std::cerr << "  Error: " << e.message << "\n";
+
+    // Verify round-tripped text preserves key elements.
+    CHECK(text.find("Noble62") != std::string::npos);
+    CHECK(text.find("membrane") != std::string::npos);
+    CHECK(text.find("V:") != std::string::npos);
+    CHECK(text.find("-87.0") != std::string::npos);
+}
+
+static void testRoundTripXmlToTextToXml() {
+    SUITE("RoundTrip/XML→Text→XML");
+
+    // Start with a hand-crafted CellML XML model.
+    std::string xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://www.cellml.org/cellml/2.0#" name="RoundTrip">
+  <component name="main">
+    <variable name="x" units="dimensionless" initial_value="5.0"/>
+    <variable name="y" units="dimensionless"/>
+    <math xmlns="http://www.w3.org/1998/Math/MathML"
+          xmlns:cellml="http://www.cellml.org/cellml/2.0#">
+      <apply><eq/>
+        <ci>y</ci>
+        <apply><times/>
+          <cn cellml:units="dimensionless">3.0</cn>
+          <ci>x</ci>
+        </apply>
+      </apply>
+    </math>
+  </component>
+</model>
+)";
+
+    // XML → Model via libCellML parser
+    auto cellmlParser = libcellml::Parser::create();
+    auto model1 = cellmlParser->parseModel(xml);
+    CHECK(model1 != nullptr);
+    CHECK_EQ(model1->name(), std::string("RoundTrip"));
+    CHECK_EQ(model1->componentCount(), size_t(1));
+
+    // Model → Text
+    std::vector<Error> errors;
+    std::string text = modelToText(model1, &errors);
+    CHECK(!text.empty());
+    CHECK(text.find("RoundTrip") != std::string::npos);
+    CHECK(text.find("main") != std::string::npos);
+
+    // Text → Model
+    errors.clear();
+    auto model2 = textToModel(text, &errors);
+    CHECK(model2 != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Error: " << e.message << "\n";
+
+    // Compare structural properties
+    CHECK_EQ(model2->name(), std::string("RoundTrip"));
+    CHECK_EQ(model2->componentCount(), size_t(1));
+
+    auto comp2 = model2->component(0);
+    CHECK_EQ(comp2->name(), std::string("main"));
+    CHECK_EQ(comp2->variableCount(), size_t(2));
+
+    auto x2 = comp2->variable("x");
+    CHECK(x2 != nullptr);
+    if (x2) {
+        CHECK_EQ(x2->initialValue(), std::string("5.0"));
+    }
+    CHECK(!comp2->math().empty());
+
+    // Model → XML (final)
+    auto printer = libcellml::Printer::create();
+    std::string finalXml = printer->printModel(model2);
+    CHECK(!finalXml.empty());
+    CHECK(finalXml.find("RoundTrip") != std::string::npos);
+    CHECK(finalXml.find("main") != std::string::npos);
+}
+
+static void testRoundTripWithConnections() {
+    SUITE("RoundTrip/Connections");
+
+    std::string input = R"(
+ConnModel {
+    parent {
+        V: mV = -75.0
+        I: child.I
+
+        child {
+            V: parent.V
+            I: uA/cm^2 = 0.0
+        }
+    }
+}
+)";
+
+    // Text → Model
+    std::vector<Error> errors;
+    auto model = textToModel(input, &errors);
+    CHECK(model != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Error: " << e.message << "\n";
+
+    // Model → Text
+    std::string output = modelToText(model, &errors);
+    CHECK(!output.empty());
+
+    // Text → Model (again)
+    errors.clear();
+    auto model2 = textToModel(output, &errors);
+    CHECK(model2 != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Error: " << e.message << "\n";
+
+    // Verify structure preserved
+    CHECK_EQ(model2->componentCount(), size_t(1));
+    auto parent = model2->component(0);
+    CHECK_EQ(parent->name(), std::string("parent"));
+    CHECK_EQ(parent->componentCount(), size_t(1));
+
+    auto child = parent->component(0);
+    CHECK_EQ(child->name(), std::string("child"));
+}
+
+static void testRoundTripXmlWithHierarchy() {
+    SUITE("RoundTrip/XMLHierarchy");
+
+    // CellML XML with encapsulation and connections
+    std::string xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://www.cellml.org/cellml/2.0#" name="HierTest">
+  <component name="parent">
+    <variable name="V" units="volt" initial_value="-0.075"
+              interface="public_and_private"/>
+  </component>
+  <component name="child">
+    <variable name="V" units="volt" interface="public"/>
+  </component>
+  <connection component_1="parent" component_2="child">
+    <map_variables variable_1="V" variable_2="V"/>
+  </connection>
+  <encapsulation>
+    <component_ref component="parent">
+      <component_ref component="child"/>
+    </component_ref>
+  </encapsulation>
+</model>
+)";
+
+    // XML → Model
+    auto cellmlParser = libcellml::Parser::create();
+    auto model1 = cellmlParser->parseModel(xml);
+    CHECK(model1 != nullptr);
+
+    // Model → Text
+    std::vector<Error> errors;
+    std::string text = modelToText(model1, &errors);
+    CHECK(!text.empty());
+
+    // Text should show the connection as dot-notation
+    CHECK(text.find("parent") != std::string::npos);
+    CHECK(text.find("child") != std::string::npos);
+    CHECK(text.find("V: parent.V") != std::string::npos);
+
+    // Text → Model
+    errors.clear();
+    auto model2 = textToModel(text, &errors);
+    CHECK(model2 != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Error: " << e.message << "\n";
+
+    // Verify hierarchy
+    auto parent = model2->component(0);
+    CHECK_EQ(parent->name(), std::string("parent"));
+    CHECK_EQ(parent->componentCount(), size_t(1));
+    auto child = parent->component(0);
+    CHECK_EQ(child->name(), std::string("child"));
+
+    // Verify equivalence
+    auto childV = child->variable("V");
+    CHECK(childV != nullptr);
+    if (childV) CHECK(childV->equivalentVariableCount() > 0);
 }
 
 // =====================================================================
@@ -684,6 +1014,7 @@ int main() {
     testLexerNumbers();
     testLexerString();
     testLexerKeywords();
+    testLexerFormerKeywords();
 
     // Units.
     testUnitSimple();
@@ -701,22 +1032,29 @@ int main() {
 
     // Parser.
     testParserMinimal();
-    testParserLegacy();
     testParserEquation();
     testParserDerivative();
     testParserPiecewise();
-    testParserMap();
-    testParserGroup();
     testParserNested();
     testParserConnection();
+    testParserReset();
+    testParserCustomUnit();
+    testParserMultipleComponents();
+    testParserDeepNesting();
+    testParserMathFunctions();
 
     // Serializer.
     testSerializerBasic();
     testSerializerConnection();
+    testSerializerNested();
+    testSerializerReset();
 
     // Round-trip.
     testRoundTripSimple();
-    testRoundTripCellMLXML();
+    testRoundTripTextToXmlToText();
+    testRoundTripXmlToTextToXml();
+    testRoundTripWithConnections();
+    testRoundTripXmlWithHierarchy();
 
     std::cout << "\n=============================\n";
     std::cout << "Tests: " << gTests

@@ -193,7 +193,7 @@ void Serializer::writeModel(const libcellml::ModelPtr &model) {
 // ===================================================================
 
 void Serializer::writeComponent(const libcellml::ComponentPtr &comp, int indent) {
-    writeLine("component " + comp->name() + " {", indent);
+    writeLine(comp->name() + " {", indent);
 
     // Variables.
     for (size_t i = 0; i < comp->variableCount(); ++i)

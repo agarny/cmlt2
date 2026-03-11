@@ -1,0 +1,27 @@
+// =====================================================================
+//  Reset Example — Integrate-and-Fire Neuron
+//
+//  Demonstrates the reset syntax in CellML Text 2.0.
+//  When the membrane potential V crosses a threshold, it is reset.
+// =====================================================================
+
+IntegrateAndFire {
+  neuron {
+    V: mV = -65.0          // membrane potential
+    t: ms                  // time
+    V_rest: mV = -65.0     // resting potential
+    V_thresh: mV = -50.0   // spike threshold
+    V_reset: mV = -65.0    // post-spike reset
+    tau: ms = 10.0         // membrane time constant
+    I_stim: uA/cm^2 = 5.0  // stimulus current
+    R: ohm = 1.0           // membrane resistance
+
+    // Leaky integrator: dV/dt = (V_rest - V + R*I) / tau
+    tau * d(V)/d(t) = V_rest - V + R * I_stim
+
+    // When V crosses threshold, reset it
+    reset V at order 1 when V > V_thresh {
+      V = V_reset
+    }
+  }
+}
