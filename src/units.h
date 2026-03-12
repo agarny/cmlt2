@@ -49,7 +49,9 @@ libcellml::UnitsPtr ensureUnits(libcellml::ModelPtr &model,
 
 // Given a libCellML Units object, produce the compact text representation.
 // Returns empty string if the units cannot be represented compactly.
-std::string unitsToText(const libcellml::UnitsPtr &units);
+// When a model is provided, user-unit references are resolved recursively.
+std::string unitsToText(const libcellml::UnitsPtr &units,
+                        const libcellml::ModelPtr &model = nullptr);
 
 // Checks whether the given name is a CellML built-in (standard) unit.
 bool isStandardUnit(const std::string &name);

@@ -21,6 +21,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -1205,12 +1206,13 @@ PharmacokineticModel {
     std::string output = modelToText(model, &errors);
     CHECK(!output.empty());
 
-    // Verify the custom unit definition is preserved.
+    // Verify the custom unit definitions are preserved.
     CHECK(output.find("unit h = 3600*s") != std::string::npos);
+    CHECK(output.find("unit per_h = 1/h") != std::string::npos);
 
     // Verify inline SI prefixed units are used (no explicit definitions).
     CHECK(output.find("C: mg/L") != std::string::npos);
-    CHECK(output.find("k_e: 1/h") != std::string::npos);
+    CHECK(output.find("k_e: per_h") != std::string::npos);
     CHECK(output.find("t: h") != std::string::npos);
 
     // Verify stable round-trip.
@@ -1222,6 +1224,149 @@ PharmacokineticModel {
     errors.clear();
     std::string output2 = modelToText(model2, &errors);
     CHECK_EQ(output, output2);
+}
+
+// =====================================================================
+//  XML → Text round-trip tests (from CellML model files)
+// =====================================================================
+
+static std::string readFile(const std::string &path) {
+    std::ifstream f(path);
+    if (!f) return "";
+    return std::string((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+}
+
+// Helper: parse CellML XML → Model → Text (pass1) → Model → Text (pass2),
+// check structural properties and stable round-trip.
+static void xmlRoundTrip(const std::string &filename,
+                          const std::string &expectedModelName,
+                          size_t minTopComponents,
+                          const std::vector<std::string> &mustContain) {
+    std::string path = std::string(TEST_MODELS_DIR) + "/" + filename;
+    std::string xml = readFile(path);
+    CHECK(!xml.empty());
+    if (xml.empty()) return;
+
+    // XML → Model via libCellML parser.
+    auto cellmlParser = libcellml::Parser::create();
+    auto model = cellmlParser->parseModel(xml);
+    CHECK(model != nullptr);
+    if (!model) return;
+    CHECK_EQ(model->name(), expectedModelName);
+
+    // Model → Text (pass 1).
+    std::vector<Error> errors;
+    std::string text1 = modelToText(model, &errors);
+    CHECK(!text1.empty());
+    for (auto &e : errors)
+        std::cerr << "  Serializer error: " << e.message << "\n";
+
+    // Check model name and top-level components.
+    CHECK(text1.find(expectedModelName) != std::string::npos);
+    CHECK(model->componentCount() >= minTopComponents);
+
+    // Check required substrings.
+    for (auto &s : mustContain)
+        CHECK(text1.find(s) != std::string::npos);
+
+    // No explicit unit definitions should be emitted for these models
+    // (all units are auto-derivable from SI).
+    CHECK(text1.find("unit ") == std::string::npos);
+
+    // Text → Model (pass 2).
+    errors.clear();
+    auto model2 = textToModel(text1, &errors);
+    CHECK(model2 != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Parse error (pass 2): L" << e.line << ":"
+                  << e.column << " " << e.message << "\n";
+    CHECK(errors.empty());
+    if (!model2) return;
+
+    // Model → Text (pass 2).
+    errors.clear();
+    std::string text2 = modelToText(model2, &errors);
+
+    // Stable round-trip.
+    CHECK_EQ(text1, text2);
+}
+
+static void testRoundTripXmlHodgkinHuxley1952() {
+    SUITE("RoundTrip/XML/HodgkinHuxley1952");
+
+    xmlRoundTrip(
+        "hodgkin_huxley_squid_axon_model_1952.cellml",
+        "hodgkin_huxley_squid_axon_model_1952",
+        4,  // environment, membrane, sodium_channel, potassium_channel, leakage_current
+        {
+            "membrane {",
+            "sodium_channel {",
+            "potassium_channel {",
+            "leakage_current {",
+            "V: mV",
+            "time: ms",
+            "Cm: uF/cm^2",
+            "g_Na: mS/cm^2",
+            "d(V)/d(time)",
+            "d(m)/d(time)",
+            "d(h)/d(time)",
+            "d(n)/d(time)",
+        });
+}
+
+static void testRoundTripXmlNoble1962() {
+    SUITE("RoundTrip/XML/Noble1962");
+
+    xmlRoundTrip(
+        "noble_model_1962.cellml",
+        "noble_model_1962",
+        4,  // environment, membrane, sodium_channel, potassium_channel, leakage_current
+        {
+            "membrane {",
+            "sodium_channel {",
+            "potassium_channel {",
+            "leakage_current {",
+            "V: mV",
+            "time: ms",
+            "alpha_m: 1/ms",
+            "d(V)/d(time)",
+            "d(m)/d(time)",
+            "d(h)/d(time)",
+            "d(n)/d(time)",
+        });
+}
+
+static void testRoundTripXmlGarny2003() {
+    SUITE("RoundTrip/XML/Garny2003");
+
+    xmlRoundTrip(
+        "garny_kohl_hunter_boyett_noble_rabbit_san_model_2003.cellml",
+        "garny_2003",
+        10,  // many components
+        {
+            "membrane {",
+            "sodium_current {",
+            "L_type_Ca_channel {",
+            "V: mV",
+            "d(V)/d(time)",
+        });
+}
+
+static void testRoundTripXmlFabbri2017() {
+    SUITE("RoundTrip/XML/Fabbri2017");
+
+    xmlRoundTrip(
+        "fabbri_fantini_wilders_severi_human_san_model_2017.cellml",
+        "Human_SAN_Fabbri_Fantini_Wilders_Severi_2017",
+        10,  // many components
+        {
+            "Membrane {",
+            "i_Na {",
+            "i_CaL {",
+            "V: mV",
+            "d(V_ode)/d(time)",
+        });
 }
 
 // =====================================================================
@@ -1284,6 +1429,12 @@ int main() {
     testRoundTripXmlWithHierarchy();
     testRoundTripHodgkinHuxley();
     testRoundTripCustomUnits();
+
+    // XML → Text round-trips.
+    testRoundTripXmlHodgkinHuxley1952();
+    testRoundTripXmlNoble1962();
+    testRoundTripXmlGarny2003();
+    testRoundTripXmlFabbri2017();
 
     std::cout << "\n=============================\n";
     std::cout << "Tests: " << gTests

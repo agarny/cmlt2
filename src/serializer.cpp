@@ -255,11 +255,12 @@ void Serializer::writeVariable(const libcellml::VariablePtr &var,
     }
     std::string unitText;
     if (units) {
-        // For standard units, auto-derived units, and dimensionless: use compact form.
-        // For user-defined units (emitted as definitions): use their name directly.
+        // For standard units, auto-derived units, and dimensionless: use compact form
+        // with model-based flattening.  For non-auto-derived units: use their
+        // defined name directly.
         if (isStandardUnit(units->name()) || units->name() == "dimensionless"
             || isAutoDerived(units, model_)) {
-            unitText = unitsToText(units);
+            unitText = unitsToText(units, model_);
         }
         if (unitText.empty())
             unitText = units->name();
@@ -519,6 +520,8 @@ void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model,
         // Skip auto-derived units (expressible via SI prefix + symbol inline).
         if (isAutoDerived(u, model)) continue;
 
+        // Don't flatten user-unit references in definitions — referenced
+        // units are either also defined or are standard/parseable.
         std::string text = unitsToText(u);
         if (!text.empty() && text != u->name()) {
             writeLine("unit " + u->name() + " = " + text, indent);

@@ -496,7 +496,63 @@ static std::string formatMultiplier(double m) {
     return os.str();
 }
 
-std::string unitsToText(const libcellml::UnitsPtr &units) {
+// Map CellML prefix name → log10 exponent for multiplier conversion.
+static double prefixNameToExponent(const std::string &name) {
+    static const std::unordered_map<std::string, double> m = {
+        {"yotta", 24}, {"zetta", 21}, {"exa", 18}, {"peta", 15},
+        {"tera", 12}, {"giga", 9}, {"mega", 6}, {"kilo", 3},
+        {"hecto", 2}, {"deca", 1},
+        {"deci", -1}, {"centi", -2}, {"milli", -3}, {"micro", -6},
+        {"nano", -9}, {"pico", -12}, {"femto", -15}, {"atto", -18},
+        {"zepto", -21}, {"yocto", -24},
+    };
+    auto it = m.find(name);
+    return (it != m.end()) ? it->second : 0.0;
+}
+
+// Recursively flatten unit factors, resolving any non-standard unit references
+// through the model until all factors reference standard (SI) units.
+static void flattenFactors(
+    const libcellml::ModelPtr &model,
+    const std::string &ref, const std::string &prefix,
+    double exponent, double multiplier,
+    std::vector<UnitFactor> &out, double &outMultiplier,
+    int depth = 0) {
+    // Standard unit — no further resolution needed.
+    if (isStandardUnit(ref) || depth > 10) {
+        outMultiplier *= multiplier;
+        out.push_back({ref, prefix, exponent, 1.0});
+        return;
+    }
+    // Try to resolve through the model.
+    if (model && model->hasUnits(ref)) {
+        auto refUnits = model->units(ref);
+        size_t n = refUnits->unitCount();
+        if (n > 0) {
+            // Convert outer prefix to a multiplier.
+            if (!prefix.empty()) {
+                double pExp = prefixNameToExponent(prefix);
+                outMultiplier *= std::pow(10.0, pExp * exponent);
+            }
+            outMultiplier *= multiplier;
+            for (size_t i = 0; i < n; ++i) {
+                std::string subRef, subPrefix, id;
+                double subExp, subMult;
+                refUnits->unitAttributes(i, subRef, subPrefix, subExp, subMult, id);
+                flattenFactors(model, subRef, subPrefix,
+                               subExp * exponent, subMult,
+                               out, outMultiplier, depth + 1);
+            }
+            return;
+        }
+    }
+    // Cannot resolve — keep as-is.
+    outMultiplier *= multiplier;
+    out.push_back({ref, prefix, exponent, 1.0});
+}
+
+std::string unitsToText(const libcellml::UnitsPtr &units,
+                        const libcellml::ModelPtr &model) {
     if (!units) return "";
 
     std::string name = units->name();
@@ -510,8 +566,8 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
     size_t count = units->unitCount();
     if (count == 0) return name;
 
-    // Collect factors and compute overall multiplier.
-    std::vector<UnitFactor> numerator, denominator;
+    // Collect factors, flattening user-unit references when possible.
+    std::vector<UnitFactor> allFactors;
     auto &c2s = cellmlToSymbol();
     auto &p2s = prefixNameToSymbol();
     double overallMultiplier = 1.0;
@@ -521,13 +577,22 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
         double exponent, multiplier;
         units->unitAttributes(i, ref, prefix, exponent, multiplier, id);
 
-        overallMultiplier *= multiplier;
+        if (model && !isStandardUnit(ref)) {
+            flattenFactors(model, ref, prefix, exponent, multiplier,
+                           allFactors, overallMultiplier);
+        } else {
+            overallMultiplier *= multiplier;
+            allFactors.push_back({ref, prefix, exponent, 1.0});
+        }
+    }
 
-        UnitFactor uf{ref, prefix, exponent, 1.0};
-        if (exponent > 0)
-            numerator.push_back(uf);
+    // Sort into numerator and denominator by exponent sign.
+    std::vector<UnitFactor> numerator, denominator;
+    for (auto &f : allFactors) {
+        if (f.exponent > 0)
+            numerator.push_back(f);
         else
-            denominator.push_back(uf);
+            denominator.push_back(f);
     }
 
     auto formatAtom = [&](const UnitFactor &f, bool inDenom) -> std::string {
@@ -584,9 +649,10 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
 // Returns true if the unit needs no explicit definition in the text.
 // ===================================================================
 
-bool isAutoDerived(const libcellml::UnitsPtr &units,
-                   const libcellml::ModelPtr &model) {
-    if (!units) return false;
+static bool isAutoDerivedImpl(const libcellml::UnitsPtr &units,
+                              const libcellml::ModelPtr &model,
+                              int depth) {
+    if (!units || depth > 10) return false;
     size_t count = units->unitCount();
     if (count == 0) return false;
 
@@ -596,14 +662,21 @@ bool isAutoDerived(const libcellml::UnitsPtr &units,
         units->unitAttributes(i, ref, prefix, exponent, multiplier, id);
 
         if (multiplier != 1.0) return false;
-        // Standard unit — OK.
         if (isStandardUnit(ref)) continue;
-        // References a unit defined in the same model — also OK,
-        // since the parser will re-create this from inline notation.
-        if (model && model->hasUnits(ref)) continue;
+        // Recursively check referenced user units.
+        if (model && model->hasUnits(ref)) {
+            if (!isAutoDerivedImpl(model->units(ref), model, depth + 1))
+                return false;
+            continue;
+        }
         return false;
     }
     return true;
+}
+
+bool isAutoDerived(const libcellml::UnitsPtr &units,
+                   const libcellml::ModelPtr &model) {
+    return isAutoDerivedImpl(units, model, 0);
 }
 
 } // namespace cellmltext
