@@ -13,10 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 
 # --- libCellML ---------------------------------------------------------
+set(COVERAGE OFF CACHE BOOL "Disable libCellML coverage" FORCE)
+set(LLVM_COVERAGE OFF CACHE BOOL "Disable libCellML LLVM coverage" FORCE)
+set(MEMCHECK OFF CACHE BOOL "Disable libCellML memcheck" FORCE)
+set(UNIT_TESTS OFF CACHE BOOL "Disable libCellML tests" FORCE)
 FetchContent_Declare(
     libcellml
     GIT_REPOSITORY https://github.com/cellml/libcellml.git
-    GIT_TAG        v0.6.3
+    GIT_TAG        387274c5da5be35a7eefbf167405ef20424308e4
 )
 FetchContent_MakeAvailable(libcellml)
 
@@ -24,7 +28,7 @@ FetchContent_MakeAvailable(libcellml)
 FetchContent_Declare(
     pugixml
     GIT_REPOSITORY https://github.com/zeux/pugixml.git
-    GIT_TAG        v1.14
+    GIT_TAG        v1.15
 )
 FetchContent_MakeAvailable(pugixml)
 
