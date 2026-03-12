@@ -142,6 +142,7 @@ std::string Serializer::serialize(const libcellml::ModelPtr &model) {
     output_.clear();
     errors_.clear();
     definedVarsCache_.clear();
+    model_ = model;
 
     writeModel(model);
     return output_;
@@ -246,9 +247,20 @@ void Serializer::writeVariable(const libcellml::VariablePtr &var,
     std::string line = var->name() + ": ";
 
     auto units = var->units();
+    // Look up the actual definition from the model if we only have a name stub.
+    if (units && units->unitCount() == 0 && model_) {
+        if (model_->hasUnits(units->name())) {
+            units = model_->units(units->name());
+        }
+    }
     std::string unitText;
     if (units) {
-        unitText = unitsToText(units);
+        // For standard units, auto-derived units, and dimensionless: use compact form.
+        // For user-defined units (emitted as definitions): use their name directly.
+        if (isStandardUnit(units->name()) || units->name() == "dimensionless"
+            || isAutoDerived(units, model_)) {
+            unitText = unitsToText(units);
+        }
         if (unitText.empty())
             unitText = units->name();
     } else {
@@ -503,6 +515,9 @@ void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model,
         auto u = model->units(i);
         if (u->isImport()) continue;
         if (isStandardUnit(u->name())) continue;
+
+        // Skip auto-derived units (expressible via SI prefix + symbol inline).
+        if (isAutoDerived(u, model)) continue;
 
         std::string text = unitsToText(u);
         if (!text.empty() && text != u->name()) {

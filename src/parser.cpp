@@ -562,8 +562,10 @@ void Parser::parseUnitDef() {
         // Override the generated name with the user-specified name.
         auto units = libcellml::Units::create(name.value);
         for (auto &f : pu.factors) {
-            if (f.cellmlPrefix.empty())
+            if (f.cellmlPrefix.empty() && f.multiplier == 1.0)
                 units->addUnit(f.cellmlUnit, f.exponent);
+            else if (f.cellmlPrefix.empty())
+                units->addUnit(f.cellmlUnit, "", f.exponent, f.multiplier);
             else
                 units->addUnit(f.cellmlUnit, f.cellmlPrefix, f.exponent, f.multiplier);
         }

@@ -50,6 +50,7 @@ private:
     std::string output_;
     std::vector<SerializeError> errors_;
     std::unordered_map<std::string, std::set<std::string>> definedVarsCache_;
+    libcellml::ModelPtr model_;
 };
 
 } // namespace cellmltext

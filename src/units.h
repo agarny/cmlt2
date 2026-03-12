@@ -54,4 +54,11 @@ std::string unitsToText(const libcellml::UnitsPtr &units);
 // Checks whether the given name is a CellML built-in (standard) unit.
 bool isStandardUnit(const std::string &name);
 
+// Checks whether a Units object is auto-derivable from its inline text form
+// (i.e., the parser can re-create it from the compact notation). This is true
+// when all factors reference standard units or model-defined units, with
+// multiplier 1.0.
+bool isAutoDerived(const libcellml::UnitsPtr &units,
+                   const libcellml::ModelPtr &model = nullptr);
+
 } // namespace cellmltext

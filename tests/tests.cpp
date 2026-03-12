@@ -1001,6 +1001,230 @@ static void testRoundTripXmlWithHierarchy() {
 }
 
 // =====================================================================
+//  Hodgkin-Huxley round-trip test
+// =====================================================================
+
+static void testRoundTripHodgkinHuxley() {
+    SUITE("RoundTrip/HodgkinHuxley");
+
+    std::string input = R"(
+HodgkinHuxley1952 {
+  membrane {
+    V: mV = -75.0
+    t: ms
+    Cm: uF/cm^2 = 1.0
+    I_Na: sodium_channel.I_Na
+    I_K: potassium_channel.I_K
+    I_L: leak_channel.I_L
+    I_stim: uA/cm^2 = 0.0
+
+    Cm * d(V)/d(t) = -(I_Na + I_K + I_L) + I_stim
+
+    sodium_channel {
+      V: membrane.V
+      I_Na: uA/cm^2
+      g_Na: mS/cm^2 = 120.0
+      E_Na: mV = 50.0
+      m: sodium_channel_m_gate.m
+      h: sodium_channel_h_gate.h
+
+      I_Na = g_Na * m^3 * h * (V - E_Na)
+
+      sodium_channel_m_gate {
+        V: membrane.V
+        t: membrane.t
+        m: dimensionless = 0.05
+        alpha_m: 1/ms
+        beta_m: 1/ms
+
+        d(m)/d(t) = alpha_m * (1 - m) - beta_m * m
+        alpha_m = {
+          0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
+          1.0  otherwise
+        }
+        beta_m = 4.0 * exp(V / 18)
+      }
+
+      sodium_channel_h_gate {
+        V: membrane.V
+        t: membrane.t
+        h: dimensionless = 0.6
+        alpha_h: 1/ms
+        beta_h: 1/ms
+
+        d(h)/d(t) = alpha_h * (1 - h) - beta_h * h
+        alpha_h = 0.07 * exp(V / 20)
+        beta_h = 1 / (exp((V + 30) / 10) + 1)
+      }
+    }
+
+    potassium_channel {
+      V: membrane.V
+      I_K: uA/cm^2
+      g_K: mS/cm^2 = 36.0
+      E_K: mV = -77.0
+      n: potassium_channel_n_gate.n
+
+      I_K = g_K * n^4 * (V - E_K)
+
+      potassium_channel_n_gate {
+        V: membrane.V
+        t: membrane.t
+        n: dimensionless = 0.325
+        alpha_n: 1/ms
+        beta_n: 1/ms
+
+        d(n)/d(t) = alpha_n * (1 - n) - beta_n * n
+        alpha_n = {
+            0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
+            0.1  otherwise
+        }
+        beta_n = 0.125 * exp(V / 80)
+      }
+    }
+
+    leak_channel {
+      V: membrane.V
+      I_L: uA/cm^2
+      g_L: mS/cm^2 = 0.3
+      E_L: mV = -54.4
+
+      I_L = g_L * (V - E_L)
+    }
+  }
+}
+)";
+
+    // Text → Model
+    std::vector<Error> errors;
+    auto model = textToModel(input, &errors);
+    CHECK(model != nullptr);
+    for (auto &e : errors)
+        std::cerr << "  Parse error: " << e.message << "\n";
+    CHECK(errors.empty());
+
+    // Model → Text
+    errors.clear();
+    std::string output = modelToText(model, &errors);
+    CHECK(!output.empty());
+
+    // Verify no redundant unit definitions are emitted.
+    CHECK(output.find("unit ") == std::string::npos);
+
+    // Verify compact SI forms are used (not CellML names).
+    CHECK(output.find("V: mV") != std::string::npos);
+    CHECK(output.find("t: ms") != std::string::npos);
+    CHECK(output.find("Cm: uF/cm^2") != std::string::npos);
+    CHECK(output.find("alpha_m: 1/ms") != std::string::npos);
+
+    // Verify key structure.
+    CHECK(output.find("HodgkinHuxley1952") != std::string::npos);
+    CHECK(output.find("membrane {") != std::string::npos);
+    CHECK(output.find("sodium_channel {") != std::string::npos);
+    CHECK(output.find("d(V)/d(t)") != std::string::npos);
+    CHECK(output.find("d(m)/d(t)") != std::string::npos);
+
+    // Verify stable round-trip: Text → Model → Text → Model → Text
+    errors.clear();
+    auto model2 = textToModel(output, &errors);
+    CHECK(model2 != nullptr);
+    CHECK(errors.empty());
+
+    errors.clear();
+    std::string output2 = modelToText(model2, &errors);
+    CHECK_EQ(output, output2);
+}
+
+// =====================================================================
+//  Unit multiplier tests
+// =====================================================================
+
+static void testUnitMultiplier() {
+    SUITE("Units/Multiplier");
+
+    auto pu = parseUnitExpression("3600*s");
+    CHECK(pu.valid);
+    CHECK_EQ(pu.factors.size(), size_t(1));
+    CHECK_EQ(pu.factors[0].cellmlUnit, std::string("second"));
+    CHECK(pu.factors[0].multiplier == 3600.0);
+    CHECK(pu.factors[0].exponent == 1.0);
+}
+
+static void testUnitMultiplierFraction() {
+    SUITE("Units/MultiplierFraction");
+
+    auto pu = parseUnitExpression("1/60*Hz");
+    CHECK(pu.valid);
+    CHECK_EQ(pu.factors.size(), size_t(1));
+    CHECK_EQ(pu.factors[0].cellmlUnit, std::string("hertz"));
+    CHECK(std::abs(pu.factors[0].multiplier - 1.0/60.0) < 1e-10);
+    CHECK(pu.factors[0].exponent == 1.0);
+}
+
+static void testUnitInlinePrefixed() {
+    SUITE("Units/InlinePrefixed");
+
+    // mg/L should parse: milligram per litre
+    auto pu = parseUnitExpression("mg/L");
+    CHECK(pu.valid);
+    CHECK_EQ(pu.factors.size(), size_t(2));
+    CHECK_EQ(pu.factors[0].cellmlUnit, std::string("gram"));
+    CHECK_EQ(pu.factors[0].cellmlPrefix, std::string("milli"));
+    CHECK(pu.factors[0].exponent == 1.0);
+    CHECK_EQ(pu.factors[1].cellmlUnit, std::string("litre"));
+    CHECK(pu.factors[1].exponent == -1.0);
+}
+
+static void testRoundTripCustomUnits() {
+    SUITE("RoundTrip/CustomUnits");
+
+    std::string input = R"(
+PharmacokineticModel {
+  unit h = 3600*s
+
+  body {
+    C: mg/L = 100.0
+    t: h
+    k_e: 1/h = 0.1
+    C_half: mg/L
+
+    d(C)/d(t) = -k_e * C
+    C_half = C / 2.0
+  }
+}
+)";
+
+    // Text → Model
+    std::vector<Error> errors;
+    auto model = textToModel(input, &errors);
+    CHECK(model != nullptr);
+    CHECK(errors.empty());
+
+    // Model → Text
+    errors.clear();
+    std::string output = modelToText(model, &errors);
+    CHECK(!output.empty());
+
+    // Verify the custom unit definition is preserved.
+    CHECK(output.find("unit h = 3600*s") != std::string::npos);
+
+    // Verify inline SI prefixed units are used (no explicit definitions).
+    CHECK(output.find("C: mg/L") != std::string::npos);
+    CHECK(output.find("k_e: 1/h") != std::string::npos);
+    CHECK(output.find("t: h") != std::string::npos);
+
+    // Verify stable round-trip.
+    errors.clear();
+    auto model2 = textToModel(output, &errors);
+    CHECK(model2 != nullptr);
+    CHECK(errors.empty());
+
+    errors.clear();
+    std::string output2 = modelToText(model2, &errors);
+    CHECK_EQ(output, output2);
+}
+
+// =====================================================================
 //  Main
 // =====================================================================
 
@@ -1024,6 +1248,9 @@ int main() {
     testUnitDimensionless();
     testUnitKg();
     testUnitMmolPerL();
+    testUnitMultiplier();
+    testUnitMultiplierFraction();
+    testUnitInlinePrefixed();
 
     // MathML.
     testMathMLGeneration();
@@ -1055,6 +1282,8 @@ int main() {
     testRoundTripXmlToTextToXml();
     testRoundTripWithConnections();
     testRoundTripXmlWithHierarchy();
+    testRoundTripHodgkinHuxley();
+    testRoundTripCustomUnits();
 
     std::cout << "\n=============================\n";
     std::cout << "Tests: " << gTests

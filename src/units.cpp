@@ -200,14 +200,25 @@ struct UnitLexer {
         return src.substr(start, pos - start);
     }
 
-    // Read an integer or simple float.
+    // Read a number (integer, float, or scientific notation).
     double readNumber() {
         skipWs();
         size_t start = pos;
         if (pos < src.size() && src[pos] == '-') ++pos;
-        while (pos < src.size() && (std::isdigit(static_cast<unsigned char>(src[pos]))
-                                    || src[pos] == '.'))
+        while (pos < src.size() && std::isdigit(static_cast<unsigned char>(src[pos])))
             ++pos;
+        if (pos < src.size() && src[pos] == '.') {
+            ++pos;
+            while (pos < src.size() && std::isdigit(static_cast<unsigned char>(src[pos])))
+                ++pos;
+        }
+        // Scientific notation: e/E followed by optional sign and digits.
+        if (pos < src.size() && (src[pos] == 'e' || src[pos] == 'E')) {
+            ++pos;
+            if (pos < src.size() && (src[pos] == '+' || src[pos] == '-')) ++pos;
+            while (pos < src.size() && std::isdigit(static_cast<unsigned char>(src[pos])))
+                ++pos;
+        }
         return std::stod(src.substr(start, pos - start));
     }
 };
@@ -260,15 +271,12 @@ static bool parseUnitTerm(UnitLexer &lex, std::vector<UnitFactor> &factors,
         return true;
     }
 
-    // Handle "1" (dimensionless base).
-    if (lex.peek() == '1' &&
-        (lex.pos + 1 >= lex.src.size() || !std::isalpha(static_cast<unsigned char>(lex.src[lex.pos + 1])))) {
-        lex.advance();
-        // "1" in numerator is a no-op; "1/x" is handled by the caller.
-        // But "1" as a standalone unit means dimensionless.
-        if (lex.atEnd() && factors.empty()) {
-            factors.push_back({"dimensionless", "", 1.0, 1.0});
-        }
+    // Handle numeric values (multipliers like 3600, 1e-3, or "1" as a
+    // dimensionless base).  Numbers are treated as pure numeric factors;
+    // the expression-level * and / operators combine them with unit atoms.
+    if (std::isdigit(static_cast<unsigned char>(lex.peek()))) {
+        double num = lex.readNumber();
+        factors.push_back({"", "", sign, num});
         return true;
     }
 
@@ -334,6 +342,25 @@ ParsedUnit parseUnitExpression(const std::string &text) {
     if (!parseUnitExpr(lex, pu.factors) || pu.factors.empty())
         return pu;
 
+    // Post-process: fold pure numeric factors into multipliers.
+    double accumulatedMultiplier = 1.0;
+    std::vector<UnitFactor> realFactors;
+    for (auto &f : pu.factors) {
+        if (f.cellmlUnit.empty()) {
+            // Pure number factor.
+            accumulatedMultiplier *= std::pow(f.multiplier, f.exponent);
+        } else {
+            realFactors.push_back(f);
+        }
+    }
+    if (!realFactors.empty() && accumulatedMultiplier != 1.0) {
+        realFactors[0].multiplier *= accumulatedMultiplier;
+    } else if (realFactors.empty()) {
+        // All factors were numbers — treat as dimensionless.
+        realFactors.push_back({"dimensionless", "", 1.0, accumulatedMultiplier});
+    }
+    pu.factors = realFactors;
+
     pu.valid = true;
     pu.cellmlName = unitTextToCellmlName(text);
     return pu;
@@ -398,6 +425,18 @@ std::string unitTextToCellmlName(const std::string &text) {
     while (!cleaned.empty() && cleaned.back() == '_')
         cleaned.pop_back();
 
+    // CellML names must not start with a digit — strip leading digits/underscores.
+    if (!cleaned.empty() && std::isdigit(static_cast<unsigned char>(cleaned[0]))) {
+        size_t start = 0;
+        while (start < cleaned.size()
+               && (std::isdigit(static_cast<unsigned char>(cleaned[start]))
+                   || cleaned[start] == '_'))
+            ++start;
+        cleaned = cleaned.substr(start);
+    }
+    if (cleaned.empty())
+        cleaned = "unit";
+
     return cleaned;
 }
 
@@ -426,8 +465,10 @@ libcellml::UnitsPtr ensureUnits(libcellml::ModelPtr &model,
 
     auto units = libcellml::Units::create(pu.cellmlName);
     for (auto &f : pu.factors) {
-        if (f.cellmlPrefix.empty()) {
+        if (f.cellmlPrefix.empty() && f.multiplier == 1.0) {
             units->addUnit(f.cellmlUnit, f.exponent);
+        } else if (f.cellmlPrefix.empty()) {
+            units->addUnit(f.cellmlUnit, "", f.exponent, f.multiplier);
         } else {
             units->addUnit(f.cellmlUnit, f.cellmlPrefix, f.exponent, f.multiplier);
         }
@@ -439,6 +480,21 @@ libcellml::UnitsPtr ensureUnits(libcellml::ModelPtr &model,
 // ===================================================================
 // Reverse: CellML Units → compact text.
 // ===================================================================
+
+static std::string formatMultiplier(double m) {
+    // Use scientific notation for very small or very large values.
+    if (m == 0.0) return "0";
+    double absm = std::abs(m);
+    if (absm >= 1.0 && absm < 1e15 && m == std::floor(m)) {
+        std::ostringstream os;
+        os << static_cast<long long>(m);
+        return os.str();
+    }
+    // Check for clean 1e-N forms.
+    std::ostringstream os;
+    os << m;
+    return os.str();
+}
 
 std::string unitsToText(const libcellml::UnitsPtr &units) {
     if (!units) return "";
@@ -454,31 +510,20 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
     size_t count = units->unitCount();
     if (count == 0) return name;
 
-    // Collect factors.
+    // Collect factors and compute overall multiplier.
     std::vector<UnitFactor> numerator, denominator;
     auto &c2s = cellmlToSymbol();
     auto &p2s = prefixNameToSymbol();
+    double overallMultiplier = 1.0;
 
     for (size_t i = 0; i < count; ++i) {
         std::string ref, prefix, id;
         double exponent, multiplier;
         units->unitAttributes(i, ref, prefix, exponent, multiplier, id);
 
-        // Convert CellML unit name to SI symbol.
-        std::string sym;
-        auto cit = c2s.find(ref);
-        sym = (cit != c2s.end()) ? cit->second : ref;
+        overallMultiplier *= multiplier;
 
-        // Convert prefix name to SI symbol.
-        std::string psym;
-        if (!prefix.empty()) {
-            auto pit = p2s.find(prefix);
-            psym = (pit != p2s.end()) ? pit->second : "";
-        }
-
-        std::string fullSym = psym + sym;
-
-        UnitFactor uf{ref, prefix, exponent, multiplier};
+        UnitFactor uf{ref, prefix, exponent, 1.0};
         if (exponent > 0)
             numerator.push_back(uf);
         else
@@ -507,8 +552,13 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
 
     std::string result;
 
-    if (numerator.empty()) {
-        result = "1";
+    // Prefix overall multiplier if not 1.0.
+    if (overallMultiplier != 1.0) {
+        result = formatMultiplier(overallMultiplier) + "*";
+    }
+
+    if (numerator.empty() && overallMultiplier == 1.0) {
+        result += "1";
     } else {
         for (size_t i = 0; i < numerator.size(); ++i) {
             if (i > 0) result += "*";
@@ -527,6 +577,33 @@ std::string unitsToText(const libcellml::UnitsPtr &units) {
     }
 
     return result;
+}
+
+// ===================================================================
+// Check if a Units object is auto-derivable from SI symbols/prefixes.
+// Returns true if the unit needs no explicit definition in the text.
+// ===================================================================
+
+bool isAutoDerived(const libcellml::UnitsPtr &units,
+                   const libcellml::ModelPtr &model) {
+    if (!units) return false;
+    size_t count = units->unitCount();
+    if (count == 0) return false;
+
+    for (size_t i = 0; i < count; ++i) {
+        std::string ref, prefix, id;
+        double exponent, multiplier;
+        units->unitAttributes(i, ref, prefix, exponent, multiplier, id);
+
+        if (multiplier != 1.0) return false;
+        // Standard unit — OK.
+        if (isStandardUnit(ref)) continue;
+        // References a unit defined in the same model — also OK,
+        // since the parser will re-create this from inline notation.
+        if (model && model->hasUnits(ref)) continue;
+        return false;
+    }
+    return true;
 }
 
 } // namespace cellmltext
