@@ -7,25 +7,100 @@ CellML Text 2.0 lets you author biological models using **natural mathematical n
 ## What it looks like
 
 ```
-NobleModel1962 {
+hodgkin_huxley_squid_axon_model_1952 {
+  environment {
+    time: leakage_current.time
+  }
+
   membrane {
-    V: mV = -87.0
-    t: ms
-    Cm: uF/cm^2 = 12.0
-    I_Na: sodium_channel.I_Na
-    I_K: uA/cm^2
+    V: mV = 0
+    E_R: mV = 0
+    Cm: uF/cm^2 = 1
+    time: environment.time
+    i_Na: sodium_channel.i_Na
+    i_K: potassium_channel.i_K
+    i_L: leakage_current.i_L
+    i_Stim: uA/cm^2
 
-    Cm * d(V)/d(t) = -(I_Na + I_K)
+    i_Stim = {
+      -20.0  when time >= 10.0 and time <= 10.5
+      0.0  otherwise
+    }
+    V' = -(-i_Stim + i_Na + i_K + i_L) / Cm
+  }
 
-    sodium_channel {
+  leakage_current {
+    i_L: uA/cm^2
+    g_L: mS/cm^2 = 0.3
+    E_L: mV
+    time: environment.time
+    V: membrane.V
+    E_R: membrane.E_R
+
+    E_L = E_R - 10.613
+    i_L = g_L * (V - E_L)
+  }
+
+  sodium_channel {
+    i_Na: uA/cm^2
+    g_Na: mS/cm^2 = 120
+    E_Na: mV
+    time: environment.time
+    V: membrane.V
+    E_R: membrane.E_R
+    m: sodium_channel_m_gate.m
+    h: sodium_channel_h_gate.h
+
+    E_Na = E_R - 115.0
+    i_Na = g_Na * m^3.0 * h * (V - E_Na)
+
+    sodium_channel_m_gate {
+      m: dimensionless = 0.05
+      alpha_m: 1/ms
+      beta_m: 1/ms
       V: membrane.V
-      g_Na: mS/cm^2 = 400.0
-      E_Na: mV = 40.0
-      m: dimensionless
-      h: dimensionless
-      I_Na: uA/cm^2
+      time: sodium_channel.time
 
-      I_Na = g_Na * m^3 * h * (V - E_Na)
+      alpha_m = 0.1 * (V + 25.0) / (exp((V + 25.0) / 10.0) - 1.0)
+      beta_m = 4.0 * exp(V / 18.0)
+      m' = alpha_m * (1.0 - m) - beta_m * m
+    }
+
+    sodium_channel_h_gate {
+      h: dimensionless = 0.6
+      alpha_h: 1/ms
+      beta_h: 1/ms
+      V: membrane.V
+      time: sodium_channel.time
+
+      alpha_h = 0.07 * exp(V / 20.0)
+      beta_h = 1.0 / (exp((V + 30.0) / 10.0) + 1.0)
+      h' = alpha_h * (1.0 - h) - beta_h * h
+    }
+  }
+
+  potassium_channel {
+    i_K: uA/cm^2
+    g_K: mS/cm^2 = 36
+    E_K: mV
+    time: environment.time
+    V: membrane.V
+    E_R: membrane.E_R
+    n: potassium_channel_n_gate.n
+
+    E_K = E_R + 12.0
+    i_K = g_K * n^4.0 * (V - E_K)
+
+    potassium_channel_n_gate {
+      n: dimensionless = 0.325
+      alpha_n: 1/ms
+      beta_n: 1/ms
+      V: membrane.V
+      time: potassium_channel.time
+
+      alpha_n = 0.01 * (V + 10.0) / (exp((V + 10.0) / 10.0) - 1.0)
+      beta_n = 0.125 * exp(V / 80.0)
+      n' = alpha_n * (1.0 - n) - beta_n * n
     }
   }
 }
