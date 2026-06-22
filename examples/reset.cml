@@ -20,7 +20,7 @@ IntegrateAndFire {
     tau * d(V)/d(t) = V_rest - V + R * I_stim
 
     // When V crosses threshold, reset it
-    reset V at order 1 when V > V_thresh {
+    reset V when V > V_thresh {
       V = V_reset
     }
   }

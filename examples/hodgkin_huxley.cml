@@ -15,7 +15,7 @@ HodgkinHuxley1952 {
     I_L: leak_channel.I_L       // leak current
     I_stim: uA/cm^2 = 0.0       // stimulus current
 
-    Cm * d(V)/d(t) = -(I_Na + I_K + I_L) + I_stim
+    Cm * V' = -(I_Na + I_K + I_L) + I_stim
 
     // ----- Sodium channel -----
 
@@ -36,7 +36,7 @@ HodgkinHuxley1952 {
         alpha_m: 1/ms            // voltage-dependent rate constant for m activation
         beta_m: 1/ms             // voltage-dependent rate constant for m inactivation
 
-        d(m)/d(t) = alpha_m * (1 - m) - beta_m * m
+        m' = alpha_m * (1 - m) - beta_m * m
         alpha_m = {
           0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
           1.0  otherwise
@@ -51,7 +51,7 @@ HodgkinHuxley1952 {
         alpha_h: 1/ms           // voltage-dependent rate constant for h activation
         beta_h: 1/ms            // voltage-dependent rate constant for h inactivation
 
-        d(h)/d(t) = alpha_h * (1 - h) - beta_h * h
+        h' = alpha_h * (1 - h) - beta_h * h
         alpha_h = 0.07 * exp(V / 20)
         beta_h = 1 / (exp((V + 30) / 10) + 1)
       }
@@ -75,7 +75,7 @@ HodgkinHuxley1952 {
         alpha_n: 1/ms             // voltage-dependent rate constant for n activation
         beta_n: 1/ms              // voltage-dependent rate constant for n inactivation
 
-        d(n)/d(t) = alpha_n * (1 - n) - beta_n * n
+        n' = alpha_n * (1 - n) - beta_n * n
         alpha_n = {
             0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
             0.1  otherwise

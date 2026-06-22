@@ -131,8 +131,10 @@ static void exprToMathMLImpl(std::ostringstream &os, const Expr *expr) {
     }
     case ExprKind::Derivative: {
         auto *d = static_cast<const DerivativeExpr *>(expr);
+        // If bvar is empty (from prime notation V'), default to 't'.
+        std::string bvar = d->bvar.empty() ? "t" : d->bvar;
         os << "<apply><diff/>"
-           << "<bvar><ci>" << d->bvar << "</ci></bvar>"
+           << "<bvar><ci>" << bvar << "</ci></bvar>"
            << "<ci>" << d->variable << "</ci>"
            << "</apply>";
         break;

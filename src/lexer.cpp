@@ -28,11 +28,9 @@ static const std::unordered_map<std::string, TokenType> kKeywords = {
     {"true",          TokenType::True},
     {"false",         TokenType::False},
     {"pi",            TokenType::Pi},
+    {"e",             TokenType::Euler},
     {"inf",           TokenType::Inf},
     {"nan",           TokenType::Nan},
-    // Note: "e" is NOT a keyword — it is contextually resolved as
-    //       the Euler constant only in expression context by the parser,
-    //       because it is commonly used as a variable name.
 };
 
 // ===================================================================
@@ -70,6 +68,19 @@ Token Lexer::makeToken(TokenType type, const std::string &value) {
 
 void Lexer::skipLineComment() {
     while (!atEnd() && peek() != '\n') advance();
+}
+
+void Lexer::skipBlockComment() {
+    advance(); // consume '*'
+    while (!atEnd()) {
+        if (peek() == '*' && peekNext() == '/') {
+            advance(); // consume '*'
+            advance(); // consume '/'
+            return;
+        }
+        advance();
+    }
+    errors_.push_back({line_, column_, "Unterminated block comment"});
 }
 
 void Lexer::skipWhitespace() {
@@ -165,10 +176,17 @@ Token Lexer::nextToken() {
     }
 
     // Comment.
-    if (c == '/' && peekNext() == '/') {
-        skipLineComment();
-        // Return a newline to mark end of comment line.
-        return Token{TokenType::Newline, "\\n", startLine, startCol};
+    if (c == '/') {
+        if (peekNext() == '/') {
+            skipLineComment();
+            // Return a newline to mark end of comment line.
+            return Token{TokenType::Newline, "\\n", startLine, startCol};
+        }
+        if (peekNext() == '*') {
+            skipBlockComment();
+            // Continue scanning after block comment.
+            return nextToken();
+        }
     }
 
     // String.
@@ -203,6 +221,7 @@ Token Lexer::nextToken() {
     case ':': return Token{TokenType::Colon,   ":",  startLine, startCol};
     case ',': return Token{TokenType::Comma,   ",",  startLine, startCol};
     case '.': return Token{TokenType::Dot,     ".",  startLine, startCol};
+    case '\'': return Token{TokenType::Prime,  "'",  startLine, startCol};
 
     case '=':
         if (match('='))

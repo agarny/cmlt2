@@ -34,7 +34,7 @@ FeatureShowcase {
       Cm: uF/cm^2 = 1.0       // capacitance
       I_ion: channel.I_ion    // connected to child's current
 
-      Cm * d(V)/d(t) = -I_ion
+      Cm * V' = -I_ion
 
       channel {
         V: cell.V              // connected to parent

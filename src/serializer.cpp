@@ -111,7 +111,7 @@ static std::string exprToText(const Expr *expr, int parentPrec) {
     }
     case ExprKind::Derivative: {
         auto *d = static_cast<const DerivativeExpr *>(expr);
-        return "d(" + d->variable + ")/d(" + d->bvar + ")";
+        return d->variable + "'";
     }
     case ExprKind::Piecewise: {
         auto *p = static_cast<const PiecewiseExpr *>(expr);
@@ -307,7 +307,6 @@ std::set<std::string> Serializer::getDefinedVarNames(
                 if (e->kind == ExprKind::Derivative) {
                     auto *d = static_cast<const DerivativeExpr *>(e);
                     names.insert(d->variable); // state variable
-                    names.insert(d->bvar);     // bound variable (e.g. t)
                     return;
                 }
                 if (e->kind == ExprKind::BinaryOp) {
@@ -364,13 +363,21 @@ std::pair<std::string, std::string> Serializer::findConnectionTarget(
             queue.push_back(eqVar->equivalentVariable(i));
     }
 
-    // No definition found — return the first direct equivalent.
+    // No definition found — return a deterministic fallback
+    // (alphabetically first equivalent by component name).
     if (var->equivalentVariableCount() > 0) {
-        auto eqVar = var->equivalentVariable(0);
-        auto eqComp = std::dynamic_pointer_cast<libcellml::Component>(
-            eqVar->parent());
-        if (eqComp)
-            return {eqComp->name(), eqVar->name()};
+        std::vector<std::pair<std::string, std::string>> candidates;
+        for (size_t i = 0; i < var->equivalentVariableCount(); ++i) {
+            auto eqVar = var->equivalentVariable(i);
+            auto eqComp = std::dynamic_pointer_cast<libcellml::Component>(
+                eqVar->parent());
+            if (eqComp)
+                candidates.push_back({eqComp->name(), eqVar->name()});
+        }
+        if (!candidates.empty()) {
+            std::sort(candidates.begin(), candidates.end());
+            return candidates[0];
+        }
     }
     return {"", ""};
 }
@@ -428,9 +435,10 @@ void Serializer::writeResets(const libcellml::ComponentPtr &comp, int indent) {
         auto var = reset->variable();
         if (!var) continue;
 
-        std::string line = "reset " + var->name()
-                         + " at order " + std::to_string(reset->order())
-                         + " when ";
+        std::string line = "reset " + var->name();
+        if (reset->order() != 1)
+            line += " at order " + std::to_string(reset->order());
+        line += " when ";
 
         std::string testMathML = reset->testValue();
         if (!testMathML.empty()) {

@@ -36,6 +36,7 @@ private:
     char advance();
     bool match(char expected);
     void skipLineComment();
+    void skipBlockComment();
     void skipWhitespace();
     bool atEnd() const;
 

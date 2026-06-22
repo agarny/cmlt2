@@ -577,15 +577,19 @@ void Parser::parseUnitDef() {
 }
 
 // ===================================================================
-//  reset <var> at order <n> when <cond> { <var> = <expr> }
+//  reset <var> [at order <n>] when <cond> { <var> = <expr> }
 // ===================================================================
 
 void Parser::parseResetStatement(const libcellml::ComponentPtr &comp) {
     expect(TokenType::Reset, "reset statement");
     Token varName = expect(TokenType::Identifier, "reset variable");
-    expect(TokenType::At, "reset");
-    expect(TokenType::Order, "reset");
-    Token orderTok = expect(TokenType::Number, "reset order");
+
+    int order = 1;
+    if (match(TokenType::At)) {
+        expect(TokenType::Order, "reset");
+        Token orderTok = expect(TokenType::Number, "reset order");
+        order = std::stoi(orderTok.value);
+    }
     expect(TokenType::When, "reset");
 
     // Parse the test condition.
@@ -613,7 +617,7 @@ void Parser::parseResetStatement(const libcellml::ComponentPtr &comp) {
     auto reset = libcellml::Reset::create();
     reset->setVariable(resetVar);
     reset->setTestVariable(resetVar);
-    reset->setOrder(std::stoi(orderTok.value));
+    reset->setOrder(order);
 
     // Test value: MathML wrapping the test expression as an equation
     // (the test_value in CellML is: "when <test_variable> <op> <value>").
@@ -725,6 +729,7 @@ ExprPtr Parser::parsePrimary() {
 
     // Constants.
     if (check(TokenType::Pi))    { advance(); return makeConst("pi"); }
+    if (check(TokenType::Euler)) { advance(); return makeConst("e"); }
     if (check(TokenType::Inf))   { advance(); return makeConst("inf"); }
     if (check(TokenType::Nan))   { advance(); return makeConst("nan"); }
     if (check(TokenType::True))  { advance(); return makeConst("true"); }
@@ -733,6 +738,12 @@ ExprPtr Parser::parsePrimary() {
     // Identifier (variable, function call, or 'd' for derivative).
     if (check(TokenType::Identifier)) {
         Token tok = advance();
+
+        // Check for prime notation: V'  → derivative.
+        if (check(TokenType::Prime)) {
+            advance(); // consume '''
+            return makeDeriv(tok.value, "");
+        }
 
         // Check for function call: IDENT '('.
         if (check(TokenType::LParen)) {

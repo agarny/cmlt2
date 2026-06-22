@@ -15,7 +15,7 @@ HodgkinHuxley1952 {
     I_Na: sodium_channel.I_Na
     I_K: uA/cm^2
 
-    Cm * d(V)/d(t) = -(I_Na + I_K)
+    Cm * V' = -(I_Na + I_K)
 
     sodium_channel {
       V: membrane.V
@@ -181,10 +181,18 @@ I_Na = g_Na * m^3 * h * (V - E_Na)
 ### Differential Equations
 
 ```
-d(V)/d(t) = -(I_Na + I_K + I_L) / Cm
+Cm * V' = -(I_Na + I_K + I_L) / Cm
+m' = alpha_m * (1 - m) - beta_m * m
 ```
 
-The `d(x)/d(y)` notation represents the derivative of `x` with respect to `y`.
+The prime (`'`) notation represents the derivative with respect to the
+independent variable (typically time). `V'` is shorthand for `d(V)/d(t)`.
+
+For backward compatibility, the full `d(x)/d(y)` syntax is also accepted:
+
+```
+d(V)/d(t) = -(I_Na + I_K + I_L) / Cm
+```
 
 ### Piecewise (Conditional) Expressions
 
@@ -250,6 +258,9 @@ x = {
 ### Constants
 `pi`, `e`, `inf`, `nan`, `true`, `false`
 
+`e` is always recognised as Euler's number and cannot be used as a variable name.
+Use `exp(1)` where Euler's number is needed in expressions.
+
 ---
 
 ## 7. Imports
@@ -276,9 +287,17 @@ stimulus {
     V_threshold: mV = 0
     V_reset: mV = -75
 
-    reset V at order 1 when V > V_threshold {
+    reset V when V > V_threshold {
         V = V_reset
     }
+}
+```
+
+The `at order <n>` clause is optional; it defaults to order 1 when omitted:
+
+```
+reset V at order 2 when V > V_threshold {
+    V = V_reset
 }
 ```
 
@@ -292,6 +311,18 @@ Single-line comments with `//`:
 // This is a comment
 V: mV = -75.0  // membrane potential
 ```
+
+Block comments with `/* ... */`:
+
+```
+/*
+ * Hodgkin-Huxley 1952 — Squid Giant Axon Model
+ * Ref: Hodgkin & Huxley (1952) J Physiol 117, 500–544
+ */
+V: mV = -75.0  /* inline comment */
+```
+
+Block comments can span multiple lines and are nestable.
 
 ---
 
@@ -317,10 +348,10 @@ add_expr      = mul_expr { ("+" | "-") mul_expr }
 mul_expr      = unary_expr { ("*" | "/") unary_expr }
 unary_expr    = ["-" | "not"] power_expr
 power_expr    = primary ["^" unary_expr]
-primary       = NUMBER | IDENTIFIER | func_call | piecewise | "(" expression ")"
+primary       = NUMBER | IDENTIFIER [ "'" ] | func_call | piecewise | "(" expression ")"
               | derivative | constant
 func_call     = IDENTIFIER "(" expression { "," expression } ")"
-derivative    = "d(" IDENTIFIER ")/d(" IDENTIFIER ")"
+derivative    = "d(" IDENTIFIER ")/d(" IDENTIFIER ")"  // legacy; V' preferred
 piecewise     = "{" piece { piece } otherwise "}"
 piece         = expression "when" expression
 otherwise     = expression "otherwise"
@@ -328,5 +359,5 @@ constant      = "pi" | "e" | "inf" | "nan" | "true" | "false"
 import_stmt   = "import" STRING "{" { import_item } "}"
 import_item   = ("component" | "unit") IDENTIFIER [ "as" IDENTIFIER ]
 unit_def      = "unit" IDENTIFIER "=" unit_expr
-reset_stmt    = "reset" IDENT "at" "order" NUMBER "when" expr "{" IDENT "=" expr "}"
+reset_stmt    = "reset" IDENT [ "at" "order" NUMBER ] "when" expr "{" IDENT "=" expr "}"
 ```

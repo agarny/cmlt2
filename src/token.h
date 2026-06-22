@@ -58,6 +58,7 @@ enum class TokenType {
     Colon,          // :
     Comma,          // ,
     Dot,            // .
+    Prime,          // '  (derivative shorthand)
 
     // Special
     Newline,
@@ -112,6 +113,7 @@ inline const char *tokenTypeName(TokenType t) {
         case TokenType::Colon:      return ":";
         case TokenType::Comma:      return ",";
         case TokenType::Dot:        return ".";
+        case TokenType::Prime:      return "'";
         case TokenType::Newline:    return "Newline";
         case TokenType::Eof:        return "EOF";
     }

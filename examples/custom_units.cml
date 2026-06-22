@@ -15,7 +15,7 @@ PharmacokineticModel {
     k_e: 1/h = 0.1     // elimination rate constant
     C_half: mg/L        // half of the concentration
 
-    d(C)/d(t) = -k_e * C
+    C' = -k_e * C
     C_half = C / 2.0
   }
 }

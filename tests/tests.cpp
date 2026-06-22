@@ -94,7 +94,7 @@ static void testLexerOperators() {
     CHECK_EQ(tokens[7].type, TokenType::Caret);
     CHECK_EQ(tokens[8].type, TokenType::Number);     // 2
     CHECK_EQ(tokens[9].type, TokenType::EqEq);
-    CHECK_EQ(tokens[10].type, TokenType::Identifier); // e
+    CHECK_EQ(tokens[10].type, TokenType::Euler);     // e
 }
 
 static void testLexerNumbers() {
@@ -123,7 +123,7 @@ static void testLexerString() {
 static void testLexerKeywords() {
     SUITE("Lexer/Keywords");
 
-    Lexer lex("import as unit reset when at order otherwise and or not true false pi inf nan");
+    Lexer lex("import as unit reset when at order otherwise and or not true false pi e inf nan");
     auto tokens = lex.tokenize();
 
     CHECK_EQ(tokens[0].type, TokenType::Import);
@@ -140,8 +140,9 @@ static void testLexerKeywords() {
     CHECK_EQ(tokens[11].type, TokenType::True);
     CHECK_EQ(tokens[12].type, TokenType::False);
     CHECK_EQ(tokens[13].type, TokenType::Pi);
-    CHECK_EQ(tokens[14].type, TokenType::Inf);
-    CHECK_EQ(tokens[15].type, TokenType::Nan);
+    CHECK_EQ(tokens[14].type, TokenType::Euler);
+    CHECK_EQ(tokens[15].type, TokenType::Inf);
+    CHECK_EQ(tokens[16].type, TokenType::Nan);
 }
 
 static void testLexerFormerKeywords() {
@@ -158,6 +159,37 @@ static void testLexerFormerKeywords() {
     CHECK_EQ(tokens[2].type, TokenType::Identifier);
     CHECK_EQ(tokens[3].type, TokenType::Identifier);
     CHECK_EQ(tokens[4].type, TokenType::Identifier);
+}
+
+static void testLexerPrime() {
+    SUITE("Lexer/Prime");
+
+    Lexer lex("V'");
+    auto tokens = lex.tokenize();
+
+    CHECK_EQ(tokens[0].type, TokenType::Identifier);
+    CHECK_EQ(tokens[0].value, std::string("V"));
+    CHECK_EQ(tokens[1].type, TokenType::Prime);
+}
+
+static void testLexerBlockComment() {
+    SUITE("Lexer/BlockComment");
+
+    Lexer lex("/* comment */ V: mV");
+    auto tokens = lex.tokenize();
+
+    CHECK_EQ(tokens[0].type, TokenType::Identifier);
+    CHECK_EQ(tokens[0].value, std::string("V"));
+}
+
+static void testLexerBlockCommentMultiLine() {
+    SUITE("Lexer/BlockCommentMultiLine");
+
+    Lexer lex("/*\n * block\n */ t: ms");
+    auto tokens = lex.tokenize();
+
+    CHECK_EQ(tokens[0].type, TokenType::Identifier);
+    CHECK_EQ(tokens[0].value, std::string("t"));
 }
 
 // =====================================================================
@@ -367,7 +399,7 @@ Test {
         V: mV
         t: ms
 
-        d(V)/d(t) = -10.0
+        V' = -10.0
     }
 }
 )";
@@ -486,7 +518,7 @@ Test {
         V_thresh: mV = -50.0
         V_reset: mV = -65.0
 
-        reset V at order 1 when V > V_thresh {
+        reset V when V > V_thresh {
             V = V_reset
         }
     }
@@ -503,7 +535,7 @@ Test {
     auto reset = comp->reset(0);
     CHECK(reset != nullptr);
     if (reset) {
-        CHECK_EQ(reset->order(), 1);
+        CHECK_EQ(reset->order(), 1);  // defaults to 1
         auto var = reset->variable();
         CHECK(var != nullptr);
         if (var) CHECK_EQ(var->name(), std::string("V"));
@@ -753,7 +785,7 @@ static void testSerializerReset() {
     Serializer ser;
     std::string text = ser.serialize(model);
 
-    CHECK(text.find("reset V at order 1 when") != std::string::npos);
+    CHECK(text.find("reset V when") != std::string::npos);
 }
 
 // =====================================================================
@@ -803,7 +835,7 @@ Noble62 {
         I_Na: uA/cm^2
         I_K: uA/cm^2
 
-        Cm * d(V)/d(t) = -(I_Na + I_K)
+        Cm * V' = -(I_Na + I_K)
     }
 }
 )";
@@ -828,6 +860,8 @@ Noble62 {
     CHECK(text.find("membrane") != std::string::npos);
     CHECK(text.find("V:") != std::string::npos);
     CHECK(text.find("-87.0") != std::string::npos);
+    // Derivative should appear as prime notation.
+    CHECK(text.find("V'") != std::string::npos);
 }
 
 static void testRoundTripXmlToTextToXml() {
@@ -1019,7 +1053,7 @@ HodgkinHuxley1952 {
     I_L: leak_channel.I_L
     I_stim: uA/cm^2 = 0.0
 
-    Cm * d(V)/d(t) = -(I_Na + I_K + I_L) + I_stim
+    Cm * V' = -(I_Na + I_K + I_L) + I_stim
 
     sodium_channel {
       V: membrane.V
@@ -1038,7 +1072,7 @@ HodgkinHuxley1952 {
         alpha_m: 1/ms
         beta_m: 1/ms
 
-        d(m)/d(t) = alpha_m * (1 - m) - beta_m * m
+        m' = alpha_m * (1 - m) - beta_m * m
         alpha_m = {
           0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
           1.0  otherwise
@@ -1053,7 +1087,7 @@ HodgkinHuxley1952 {
         alpha_h: 1/ms
         beta_h: 1/ms
 
-        d(h)/d(t) = alpha_h * (1 - h) - beta_h * h
+        h' = alpha_h * (1 - h) - beta_h * h
         alpha_h = 0.07 * exp(V / 20)
         beta_h = 1 / (exp((V + 30) / 10) + 1)
       }
@@ -1075,7 +1109,7 @@ HodgkinHuxley1952 {
         alpha_n: 1/ms
         beta_n: 1/ms
 
-        d(n)/d(t) = alpha_n * (1 - n) - beta_n * n
+        n' = alpha_n * (1 - n) - beta_n * n
         alpha_n = {
             0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
             0.1  otherwise
@@ -1114,7 +1148,7 @@ HodgkinHuxley1952 {
 
     // Verify compact SI forms are used (not CellML names).
     CHECK(output.find("V: mV") != std::string::npos);
-    CHECK(output.find("t: ms") != std::string::npos);
+    CHECK(output.find("t: sodium_channel.t") != std::string::npos);
     CHECK(output.find("Cm: uF/cm^2") != std::string::npos);
     CHECK(output.find("alpha_m: 1/ms") != std::string::npos);
 
@@ -1122,8 +1156,8 @@ HodgkinHuxley1952 {
     CHECK(output.find("HodgkinHuxley1952") != std::string::npos);
     CHECK(output.find("membrane {") != std::string::npos);
     CHECK(output.find("sodium_channel {") != std::string::npos);
-    CHECK(output.find("d(V)/d(t)") != std::string::npos);
-    CHECK(output.find("d(m)/d(t)") != std::string::npos);
+    CHECK(output.find("V'") != std::string::npos);
+    CHECK(output.find("m'") != std::string::npos);
 
     // Verify stable round-trip: Text → Model → Text → Model → Text
     errors.clear();
@@ -1189,7 +1223,7 @@ PharmacokineticModel {
     k_e: 1/h = 0.1
     C_half: mg/L
 
-    d(C)/d(t) = -k_e * C
+        d(C)/d(t) = -k_e * C  // old syntax still accepted
     C_half = C / 2.0
   }
 }
@@ -1305,13 +1339,13 @@ static void testRoundTripXmlHodgkinHuxley1952() {
             "potassium_channel {",
             "leakage_current {",
             "V: mV",
-            "time: ms",
+            "time: environment.time",
             "Cm: uF/cm^2",
             "g_Na: mS/cm^2",
-            "d(V)/d(time)",
-            "d(m)/d(time)",
-            "d(h)/d(time)",
-            "d(n)/d(time)",
+            "V'",
+            "m'",
+            "h'",
+            "n'",
         });
 }
 
@@ -1328,12 +1362,12 @@ static void testRoundTripXmlNoble1962() {
             "potassium_channel {",
             "leakage_current {",
             "V: mV",
-            "time: ms",
+            "time: environment.time",
             "alpha_m: 1/ms",
-            "d(V)/d(time)",
-            "d(m)/d(time)",
-            "d(h)/d(time)",
-            "d(n)/d(time)",
+            "V'",
+            "m'",
+            "h'",
+            "n'",
         });
 }
 
@@ -1349,7 +1383,7 @@ static void testRoundTripXmlGarny2003() {
             "sodium_current {",
             "L_type_Ca_channel {",
             "V: mV",
-            "d(V)/d(time)",
+            "V'",
         });
 }
 
@@ -1365,7 +1399,7 @@ static void testRoundTripXmlFabbri2017() {
             "i_Na {",
             "i_CaL {",
             "V: mV",
-            "d(V_ode)/d(time)",
+            "V_ode'",
         });
 }
 
@@ -1384,6 +1418,9 @@ int main() {
     testLexerString();
     testLexerKeywords();
     testLexerFormerKeywords();
+    testLexerPrime();
+    testLexerBlockComment();
+    testLexerBlockCommentMultiLine();
 
     // Units.
     testUnitSimple();
