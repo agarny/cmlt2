@@ -525,10 +525,8 @@ void Serializer::writeUnitDefinitions(const libcellml::ModelPtr &model,
         std::string text = unitsToText(u);
         if (!text.empty() && text != u->name()) {
             writeLine("unit " + u->name() + " = " + text, indent);
-        } else {
-            writeLine("unit " + u->name() + " = " + u->name(), indent);
+            hasCustomUnits = true;
         }
-        hasCustomUnits = true;
     }
     if (hasCustomUnits) newline();
 }
