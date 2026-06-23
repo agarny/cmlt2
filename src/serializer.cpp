@@ -118,7 +118,7 @@ static std::string exprToText(const Expr *expr, int parentPrec) {
         std::string result = "{\n";
         for (auto &[val, cond] : p->pieces) {
             result += "    " + exprToText(val.get(), 0)
-                    + "  when " + exprToText(cond.get(), 0) + "\n";
+                    + "  if " + exprToText(cond.get(), 0) + "\n";
         }
         if (p->otherwise) {
             result += "    " + exprToText(p->otherwise.get(), 0) + "  otherwise\n";
@@ -411,7 +411,7 @@ void Serializer::writeEquations(const libcellml::ComponentPtr &comp,
             write(lhsText + " = {\n");
             for (auto &[val, cond] : pw->pieces) {
                 writeIndent(indent + 1);
-                write(exprToText(val.get(), 0) + "  when "
+                write(exprToText(val.get(), 0) + "  if "
                       + exprToText(cond.get(), 0) + "\n");
             }
             if (pw->otherwise) {
@@ -438,7 +438,7 @@ void Serializer::writeResets(const libcellml::ComponentPtr &comp, int indent) {
         std::string line = "reset " + var->name();
         if (reset->order() != 1)
             line += " at order " + std::to_string(reset->order());
-        line += " when ";
+        line += " if ";
 
         std::string testMathML = reset->testValue();
         if (!testMathML.empty()) {

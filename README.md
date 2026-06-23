@@ -23,7 +23,7 @@ hodgkin_huxley_squid_axon_model_1952 {
     i_Stim: uA/cm^2
 
     i_Stim = {
-      -20.0  when time >= 10.0 and time <= 10.5
+      -20.0  if time >= 10.0 and time <= 10.5
       0.0  otherwise
     }
     V' = -(-i_Stim + i_Na + i_K + i_L) / Cm
@@ -113,8 +113,8 @@ hodgkin_huxley_squid_axon_model_1952 {
 - **No CellML knowledge needed** — the syntax reads like a maths textbook
 - **Nested components** — hierarchy is expressed directly via nesting
 - **Dot-notation connections** — connect variables across components with `comp.var`
-- **Piecewise functions** — use `when`/`otherwise` for conditional expressions
-- **Resets** — define reset behaviour with `reset var at order ... when cond { ... }`
+- **Piecewise** — use `if`/`otherwise` for conditional expressions
+- **Resets** — define reset behaviour with `reset var at order ... if cond { ... }`
 - **Imports** — reuse components and units from other files
 - **Custom units** — define your own units from SI building blocks
 - **Full round-trip** — convert CellML XML ↔ CellML Text 2.0 losslessly
@@ -174,8 +174,8 @@ See [SYNTAX.md](SYNTAX.md) for the complete specification. Highlights:
 | Connection | `V: parent.V` |
 | Equation | `I = g * (V - E)` |
 | Derivative | `d(V)/d(t) = -I / Cm` |
-| Piecewise | `x = { expr when cond \| expr otherwise }` |
-| Reset | `reset V at order 1 when V > thresh { V = V_reset }` |
+| Piecewise | `x = { expr if cond \| expr otherwise }` |
+| Reset | `reset V at order 1 if V > thresh { V = V_reset }` |
 | Custom unit | `unit beats_per_min = 1/60 * Hz` |
 | Import | `import "file.cellml" { component name }` |
 | Units | `mV`, `mS/cm^2`, `uA/cm^2`, `mmol/L`, `1/ms` |

@@ -422,7 +422,7 @@ Test {
         V: mV
 
         x = {
-            1.0  when V > 0
+            1.0  if V > 0
             0.0  otherwise
         }
     }
@@ -518,7 +518,7 @@ Test {
         V_thresh: mV = -50.0
         V_reset: mV = -65.0
 
-        reset V when V > V_thresh {
+        reset V if V > V_thresh {
             V = V_reset
         }
     }
@@ -785,7 +785,7 @@ static void testSerializerReset() {
     Serializer ser;
     std::string text = ser.serialize(model);
 
-    CHECK(text.find("reset V when") != std::string::npos);
+    CHECK(text.find("reset V if") != std::string::npos);
 }
 
 // =====================================================================
@@ -1074,7 +1074,7 @@ HodgkinHuxley1952 {
 
         m' = alpha_m * (1 - m) - beta_m * m
         alpha_m = {
-          0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
+          0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  if V != -25
           1.0  otherwise
         }
         beta_m = 4.0 * exp(V / 18)
@@ -1111,7 +1111,7 @@ HodgkinHuxley1952 {
 
         n' = alpha_n * (1 - n) - beta_n * n
         alpha_n = {
-            0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  when V != -10
+            0.01 * (V + 10) / (exp((V + 10) / 10) - 1)  if V != -10
             0.1  otherwise
         }
         beta_n = 0.125 * exp(V / 80)

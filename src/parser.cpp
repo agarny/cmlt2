@@ -210,7 +210,7 @@ void Parser::parseComponentBody(const libcellml::ComponentPtr &comp) {
             continue;
         }
 
-        // Check for piecewise on RHS: { ... when ... otherwise ... }
+        // Check for piecewise on RHS: { ... if ... otherwise ... }
         ExprPtr rhs;
         if (check(TokenType::LBrace)) {
             rhs = parsePiecewise();
@@ -577,7 +577,7 @@ void Parser::parseUnitDef() {
 }
 
 // ===================================================================
-//  reset <var> [at order <n>] when <cond> { <var> = <expr> }
+//  reset <var> [at order <n>] if <cond> { <var> = <expr> }
 // ===================================================================
 
 void Parser::parseResetStatement(const libcellml::ComponentPtr &comp) {
@@ -590,7 +590,7 @@ void Parser::parseResetStatement(const libcellml::ComponentPtr &comp) {
         Token orderTok = expect(TokenType::Number, "reset order");
         order = std::stoi(orderTok.value);
     }
-    expect(TokenType::When, "reset");
+    expect(TokenType::If, "reset");
 
     // Parse the test condition.
     ExprPtr testExpr = parseExpression();
@@ -821,7 +821,7 @@ ExprPtr Parser::parseFunctionCall(const std::string &name) {
 }
 
 // ===================================================================
-//  Piecewise: { expr when cond \n expr when cond \n expr otherwise }
+//  Piecewise: { expr if cond \n expr if cond \n expr otherwise }
 // ===================================================================
 
 ExprPtr Parser::parsePiecewise() {
@@ -837,14 +837,14 @@ ExprPtr Parser::parsePiecewise() {
         ExprPtr value = parseExpression();
         value = transformDerivatives(std::move(value));
 
-        if (match(TokenType::When)) {
+        if (match(TokenType::If)) {
             ExprPtr condition = parseExpression();
             condition = transformDerivatives(std::move(condition));
             pw->pieces.emplace_back(std::move(value), std::move(condition));
         } else if (match(TokenType::Otherwise)) {
             pw->otherwise = std::move(value);
         } else {
-            error("Expected 'when' or 'otherwise' in piecewise expression");
+            error("Expected 'if' or 'otherwise' in piecewise expression");
             break;
         }
         skipNewlines();

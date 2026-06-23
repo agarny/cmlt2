@@ -198,16 +198,16 @@ d(V)/d(t) = -(I_Na + I_K + I_L) / Cm
 
 ```
 alpha_m = {
-    0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  when V != -25
-    1.0                                           otherwise
+    0.1 * (V + 25) / (exp((V + 25) / 10) - 1)  if V != -25
+    1.0                                        otherwise
 }
 ```
 
 Multiple conditions:
 ```
 x = {
-    expr1  when condition1
-    expr2  when condition2
+    expr1  if condition1
+    expr2  if condition2
     expr3  otherwise
 }
 ```
@@ -287,7 +287,7 @@ stimulus {
     V_threshold: mV = 0
     V_reset: mV = -75
 
-    reset V when V > V_threshold {
+    reset V if V > V_threshold {
         V = V_reset
     }
 }
@@ -296,7 +296,7 @@ stimulus {
 The `at order <n>` clause is optional; it defaults to order 1 when omitted:
 
 ```
-reset V at order 2 when V > V_threshold {
+reset V at order 2 if V > V_threshold {
     V = V_reset
 }
 ```
@@ -353,11 +353,11 @@ primary       = NUMBER | IDENTIFIER [ "'" ] | func_call | piecewise | "(" expres
 func_call     = IDENTIFIER "(" expression { "," expression } ")"
 derivative    = "d(" IDENTIFIER ")/d(" IDENTIFIER ")"  // legacy; V' preferred
 piecewise     = "{" piece { piece } otherwise "}"
-piece         = expression "when" expression
+piece         = expression "if" expression
 otherwise     = expression "otherwise"
 constant      = "pi" | "e" | "inf" | "nan" | "true" | "false"
 import_stmt   = "import" STRING "{" { import_item } "}"
 import_item   = ("component" | "unit") IDENTIFIER [ "as" IDENTIFIER ]
 unit_def      = "unit" IDENTIFIER "=" unit_expr
-reset_stmt    = "reset" IDENT [ "at" "order" NUMBER ] "when" expr "{" IDENT "=" expr "}"
+reset_stmt    = "reset" IDENT [ "at" "order" NUMBER ] "if" expr "{" IDENT "=" expr "}"
 ```

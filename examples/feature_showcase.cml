@@ -8,7 +8,7 @@
 //    - Variable connections (dot-notation)
 //    - Algebraic equations
 //    - Differential equations  d(x)/d(t)
-//    - Piecewise expressions   { ... when ... otherwise ... }
+//    - Piecewise expressions   { ... if ... otherwise ... }
 //    - Mathematical functions   exp, sin, sqrt, ln, abs, ...
 //    - Constants                pi, e, true, false
 //    - Logical/comparison ops   and, or, not, ==, !=, <, >, <=, >=
@@ -56,7 +56,7 @@ FeatureShowcase {
 
       // Periodic square pulse
       I = {
-        amplitude  when t - floor(t / period) * period < duration
+        amplitude  if t - floor(t / period) * period < duration
         0.0        otherwise
       }
     }
@@ -67,8 +67,8 @@ FeatureShowcase {
       count: dimensionless = 0.0
       V: mV = 0.0
 
-      // Reset count to zero when it exceeds 10
-      reset count at order 1 when count > 10.0 {
+      // Reset count to zero if it exceeds 10
+      reset count at order 1 if count > 10.0 {
         count = 0.0
       }
     }
@@ -86,8 +86,8 @@ FeatureShowcase {
       z = sqrt(abs(x)) + ln(x + 1.0)
       w = x^2 + pi * x
       flag = {
-        1.0  when x > 0.0 and x < 10.0
-        0.0  when x <= 0.0 or not (x == x)
+        1.0  if x > 0.0 and x < 10.0
+        0.0  if x <= 0.0 or not (x == x)
         -1.0  otherwise
       }
     }

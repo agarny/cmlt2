@@ -21,6 +21,7 @@ enum class TokenType {
     Unit,           // unit
     Reset,          // reset
     When,           // when
+    If,             // if
     At,             // at
     Order,          // order
     Otherwise,      // otherwise
@@ -82,6 +83,7 @@ inline const char *tokenTypeName(TokenType t) {
         case TokenType::Unit:       return "unit";
         case TokenType::Reset:      return "reset";
         case TokenType::When:       return "when";
+        case TokenType::If:         return "if";
         case TokenType::At:         return "at";
         case TokenType::Order:      return "order";
         case TokenType::Otherwise:  return "otherwise";
