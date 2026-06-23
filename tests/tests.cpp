@@ -123,14 +123,14 @@ static void testLexerString() {
 static void testLexerKeywords() {
     SUITE("Lexer/Keywords");
 
-    Lexer lex("import as unit reset when at order otherwise and or not true false pi e inf nan");
+    Lexer lex("import as unit reset if at order otherwise and or not true false pi e inf nan");
     auto tokens = lex.tokenize();
 
     CHECK_EQ(tokens[0].type, TokenType::Import);
     CHECK_EQ(tokens[1].type, TokenType::As);
     CHECK_EQ(tokens[2].type, TokenType::Unit);
     CHECK_EQ(tokens[3].type, TokenType::Reset);
-    CHECK_EQ(tokens[4].type, TokenType::When);
+    CHECK_EQ(tokens[4].type, TokenType::If);
     CHECK_EQ(tokens[5].type, TokenType::At);
     CHECK_EQ(tokens[6].type, TokenType::Order);
     CHECK_EQ(tokens[7].type, TokenType::Otherwise);
@@ -143,22 +143,6 @@ static void testLexerKeywords() {
     CHECK_EQ(tokens[14].type, TokenType::Euler);
     CHECK_EQ(tokens[15].type, TokenType::Inf);
     CHECK_EQ(tokens[16].type, TokenType::Nan);
-}
-
-static void testLexerFormerKeywords() {
-    SUITE("Lexer/FormerKeywords");
-
-    // model, component, map, group, contains are now regular identifiers
-    Lexer lex("model component map group contains");
-    auto tokens = lex.tokenize();
-
-    CHECK_EQ(tokens[0].type, TokenType::Identifier);
-    CHECK_EQ(tokens[0].value, std::string("model"));
-    CHECK_EQ(tokens[1].type, TokenType::Identifier);
-    CHECK_EQ(tokens[1].value, std::string("component"));
-    CHECK_EQ(tokens[2].type, TokenType::Identifier);
-    CHECK_EQ(tokens[3].type, TokenType::Identifier);
-    CHECK_EQ(tokens[4].type, TokenType::Identifier);
 }
 
 static void testLexerPrime() {
@@ -1417,7 +1401,6 @@ int main() {
     testLexerNumbers();
     testLexerString();
     testLexerKeywords();
-    testLexerFormerKeywords();
     testLexerPrime();
     testLexerBlockComment();
     testLexerBlockCommentMultiLine();

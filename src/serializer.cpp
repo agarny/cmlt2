@@ -313,10 +313,28 @@ std::set<std::string> Serializer::getDefinedVarNames(
                     auto *b = static_cast<const BinaryOpExpr *>(e);
                     findDerivs(b->left.get());
                     findDerivs(b->right.get());
+                    return;
                 }
                 if (e->kind == ExprKind::UnaryOp) {
                     auto *u = static_cast<const UnaryOpExpr *>(e);
                     findDerivs(u->operand.get());
+                    return;
+                }
+                if (e->kind == ExprKind::FunctionCall) {
+                    auto *f = static_cast<const FunctionCallExpr *>(e);
+                    for (auto &a : f->args)
+                        findDerivs(a.get());
+                    return;
+                }
+                if (e->kind == ExprKind::Piecewise) {
+                    auto *pw = static_cast<const PiecewiseExpr *>(e);
+                    for (auto &[v, c] : pw->pieces) {
+                        findDerivs(v.get());
+                        findDerivs(c.get());
+                    }
+                    if (pw->otherwise)
+                        findDerivs(pw->otherwise.get());
+                    return;
                 }
             };
             findDerivs(lhs.get());
@@ -391,7 +409,6 @@ void Serializer::writeEquations(const libcellml::ComponentPtr &comp,
     std::string mathml = comp->math();
     if (mathml.empty()) return;
 
-    MathError err;
     std::vector<MathError> mathErrors;
     auto equations = mathMLToEquations(mathml, &mathErrors);
 

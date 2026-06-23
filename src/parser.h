@@ -51,7 +51,6 @@ private:
     // Inside component.
     void parseComponentBody(const libcellml::ComponentPtr &comp);
     void parseVarDecl(const libcellml::ComponentPtr &comp);
-    void parseEquation(const libcellml::ComponentPtr &comp);
     void parseResetStatement(const libcellml::ComponentPtr &comp);
 
     // Unit expression (after ':').

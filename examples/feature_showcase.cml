@@ -7,11 +7,11 @@
 //    - Variable definitions with units and initial values
 //    - Variable connections (dot-notation)
 //    - Algebraic equations
-//    - Differential equations  d(x)/d(t)
+//    - Differential equations  V' (prime notation)
 //    - Piecewise expressions   { ... if ... otherwise ... }
-//    - Mathematical functions   exp, sin, sqrt, ln, abs, ...
-//    - Constants                pi, e, true, false
-//    - Logical/comparison ops   and, or, not, ==, !=, <, >, <=, >=
+//    - Mathematical functions  exp, sin, sqrt, ln, abs, ...
+//    - Constants               pi, e, true, false
+//    - Logical/comparison ops  and, or, not, ==, !=, <, >, <=, >=
 //    - Custom unit definitions
 //    - Resets
 //    - Comments

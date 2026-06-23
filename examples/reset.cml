@@ -17,7 +17,7 @@ IntegrateAndFire {
     R: ohm = 1.0           // membrane resistance
 
     // Leaky integrator: dV/dt = (V_rest - V + R*I) / tau
-    tau * d(V)/d(t) = V_rest - V + R * I_stim
+    tau * V' = V_rest - V + R * I_stim
 
     // When V crosses threshold, reset it
     reset V if V > V_thresh {

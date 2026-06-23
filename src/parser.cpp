@@ -16,7 +16,6 @@
 #include <libcellml/variable.h>
 
 #include <algorithm>
-#include <cassert>
 #include <unordered_map>
 
 namespace cellmltext {
@@ -296,6 +295,8 @@ void Parser::parseVarDecl(const libcellml::ComponentPtr &comp) {
         } else if (check(TokenType::Minus)) {
             advance();
             if (check(TokenType::Number)) {
+                var->setInitialValue("-" + advance().value);
+            } else if (check(TokenType::Identifier)) {
                 var->setInitialValue("-" + advance().value);
             }
         } else if (check(TokenType::Identifier)) {

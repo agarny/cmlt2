@@ -18,7 +18,6 @@ static const std::unordered_map<std::string, TokenType> kKeywords = {
     {"as",            TokenType::As},
     {"unit",          TokenType::Unit},
     {"reset",         TokenType::Reset},
-    {"when",          TokenType::When},
     {"if",            TokenType::If},
     {"at",            TokenType::At},
     {"order",         TokenType::Order},
